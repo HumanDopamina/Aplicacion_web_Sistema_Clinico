@@ -1,0 +1,115 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { changePassword, confirmPasswordReset, logout, requestPasswordReset } from './authService'
+
+describe('authService.logout', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('revokes the refresh token using the authenticated API endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: () => Promise.reject(new SyntaxError('No content')),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await logout({ access: 'access-token', refresh: 'refresh-token' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/auth/logout/',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ refresh: 'refresh-token' }),
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    )
+  })
+})
+
+describe('password reset services', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('requests a recovery email from the password reset endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ detail: 'Solicitud recibida.' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await requestPasswordReset({ email: 'user@test.com' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/auth/password-reset/',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ email: 'user@test.com' }),
+      }),
+    )
+  })
+
+  it('submits the token and new password to the confirmation endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ detail: 'Contraseña actualizada.' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const payload = {
+      uid: 'uid-value',
+      token: 'token-value',
+      new_password: 'NuevaContraseña123!',
+      confirm_password: 'NuevaContraseña123!',
+    }
+
+    await confirmPasswordReset(payload)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/auth/password-reset/confirm/',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(payload) }),
+    )
+  })
+
+  it('surfaces field validation errors returned by the reset API', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ token: ['El enlace no es válido o ha expirado.'] }),
+    }))
+
+    await expect(confirmPasswordReset({
+      uid: 'uid-value',
+      token: 'expired-token',
+      new_password: 'NuevaContraseña123!',
+      confirm_password: 'NuevaContraseña123!',
+    })).rejects.toThrow('El enlace no es válido o ha expirado.')
+  })
+})
+
+describe('authService.changePassword', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('submits the password change with bearer authentication', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ detail: 'Tu contraseña fue actualizada correctamente.' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const credentials = {
+      current_password: 'Actual123!',
+      new_password: 'Nueva456!',
+      confirm_password: 'Nueva456!',
+    }
+
+    await changePassword({ access: 'access-token', ...credentials })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/auth/password-change/',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(credentials),
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    )
+  })
+})
