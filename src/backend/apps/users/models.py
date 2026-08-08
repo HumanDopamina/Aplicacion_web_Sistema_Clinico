@@ -42,3 +42,23 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+
+class RolePermissionPreset(models.Model):
+    """Global permissions inherited by every user assigned to a role."""
+
+    role = models.CharField(
+        max_length=20,
+        unique=True,
+        choices=(
+            (User.Role.RECEPCIONISTA, "Recepcionista"),
+            (User.Role.ODONTOLOGO, "Odontólogo"),
+        ),
+    )
+    permissions = models.JSONField(default=list)
+
+    class Meta:
+        ordering = ("role",)
+
+    def __str__(self):
+        return self.get_role_display()

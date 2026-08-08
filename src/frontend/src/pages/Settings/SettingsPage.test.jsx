@@ -5,7 +5,13 @@ import { AuthContext } from '../../context/authContextValue'
 import * as userService from '../../services/userService'
 import SettingsPage from './SettingsPage'
 
-vi.mock('../../services/userService')
+vi.mock('../../services/userService', () => ({
+  createUser: vi.fn(),
+  listRolePermissionPresets: vi.fn(),
+  listUsers: vi.fn(),
+  updateRolePermissionPreset: vi.fn(),
+  updateUser: vi.fn(),
+}))
 
 const renderPage = () => render(
   <MemoryRouter>
@@ -43,6 +49,23 @@ describe('SettingsPage staff management', () => {
       role: 'ODONTOLOGO',
       is_active: false,
     })
+    userService.listRolePermissionPresets.mockResolvedValue({
+      available_permissions: [
+        { code: 'patients.view', label: 'Ver pacientes', group: 'Pacientes' },
+        { code: 'patients.create', label: 'Registrar pacientes', group: 'Pacientes' },
+        { code: 'patients.edit', label: 'Editar pacientes', group: 'Pacientes' },
+        { code: 'appointments.view', label: 'Ver citas', group: 'Citas' },
+        { code: 'appointments.create', label: 'Crear citas', group: 'Citas' },
+      ],
+      presets: [
+        { role: 'RECEPCIONISTA', permissions: ['patients.view', 'patients.create', 'patients.edit', 'appointments.view', 'appointments.create'] },
+        { role: 'ODONTOLOGO', permissions: ['patients.view', 'appointments.view'] },
+      ],
+    })
+    userService.updateRolePermissionPreset.mockResolvedValue({
+      role: 'ODONTOLOGO',
+      permissions: ['patients.view', 'patients.create', 'appointments.view'],
+    })
   })
   afterEach(() => {
     cleanup()
@@ -54,6 +77,59 @@ describe('SettingsPage staff management', () => {
 
     expect(await screen.findByText('Aún no hay miembros registrados.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Añadir miembro' })).toBeInTheDocument()
+  })
+
+  it('[HU-09] shows every registered user with role and active status', async () => {
+    userService.listUsers.mockResolvedValue([
+      {
+        id: 2,
+        email: 'ana@dentalclinic.com',
+        first_name: 'Ana',
+        last_name: 'Pérez',
+        role: 'ODONTOLOGO',
+        is_active: true,
+      },
+      {
+        id: 3,
+        email: 'bruno@dentalclinic.com',
+        first_name: 'Bruno',
+        last_name: 'López',
+        role: 'RECEPCIONISTA',
+        is_active: false,
+      },
+    ])
+    renderPage()
+
+    expect(await screen.findByText('Ana Pérez')).toBeInTheDocument()
+    expect(screen.getByText('Bruno López')).toBeInTheDocument()
+    expect(screen.getByText('Odontólogo')).toBeInTheDocument()
+    expect(screen.getByText('Recepcionista')).toBeInTheDocument()
+    expect(screen.getByText('Activo')).toBeInTheDocument()
+    expect(screen.getByText('Inactivo')).toBeInTheDocument()
+  })
+
+  it('[HU-09] lets an administrator update the permissions preset for a role', async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: /Permisos por rol/ }))
+    expect(await screen.findByRole('heading', { name: 'Permisos por rol' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Recepcionista' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByLabelText('Editar pacientes')).toBeChecked()
+    fireEvent.click(screen.getByRole('button', { name: 'Odontólogo' }))
+    expect(screen.getByLabelText('Registrar pacientes')).not.toBeChecked()
+    expect(screen.getByLabelText('Editar pacientes')).not.toBeChecked()
+
+    fireEvent.click(screen.getByLabelText('Registrar pacientes'))
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar permisos' }))
+
+    await waitFor(() => expect(userService.updateRolePermissionPreset).toHaveBeenCalledWith(
+      'access-token',
+      'ODONTOLOGO',
+      ['patients.view', 'patients.create', 'appointments.view'],
+    ))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Permisos de Odontólogo actualizados.',
+    )
   })
 
   it('registers a member and adds it to the staff list', async () => {
@@ -100,6 +176,14 @@ describe('SettingsPage staff management', () => {
       role: 'RECEPCIONISTA',
       is_active: true,
     }])
+    userService.updateUser.mockResolvedValue({
+      id: 7,
+      email: 'elena.editada@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Vargas',
+      role: 'ODONTOLOGO',
+      is_active: true,
+    })
     renderPage()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
@@ -108,16 +192,41 @@ describe('SettingsPage staff management', () => {
     fireEvent.change(screen.getByLabelText('Apellidos'), { target: { value: 'Vargas' } })
     fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'elena.editada@dentalclinic.com' } })
     fireEvent.change(screen.getByLabelText('Rol'), { target: { value: 'ODONTOLOGO' } })
-    fireEvent.click(screen.getByLabelText('Usuario activo'))
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
 
     expect(await screen.findByText('elena.editada@dentalclinic.com')).toBeInTheDocument()
-    expect(screen.getByText('Inactivo')).toBeInTheDocument()
+    expect(screen.getByText('Activo')).toBeInTheDocument()
     expect(userService.updateUser).toHaveBeenCalledWith('access-token', 7, {
       email: 'elena.editada@dentalclinic.com',
       first_name: 'Elena',
       last_name: 'Vargas',
       role: 'ODONTOLOGO',
+      is_active: true,
+    })
+  })
+
+  it('[HU-07] deactivates a member and updates the visible status', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    fireEvent.click(screen.getByLabelText('Usuario activo'))
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByText('Inactivo')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Editar miembro' })).not.toBeInTheDocument()
+    expect(userService.updateUser).toHaveBeenCalledWith('access-token', 7, {
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      role: 'RECEPCIONISTA',
       is_active: false,
     })
   })

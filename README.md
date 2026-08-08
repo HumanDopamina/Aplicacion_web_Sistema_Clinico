@@ -12,6 +12,7 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Invalidación de sesiones anteriores después de cambiar la contraseña.
 - Administración de usuarios por parte del rol administrador.
 - Prevención de cuentas duplicadas mediante validación de correo.
+- Registro y búsqueda de pacientes con apertura automática de su expediente base.
 
 ## Tecnologías
 
@@ -93,6 +94,8 @@ El modelo de usuario utiliza el correo electrónico como identificador de acceso
 - `ADMINISTRADOR`
 - `RECEPCIONISTA`
 - `ODONTOLOGO`
+
+El administrador configura presets globales de permisos para `RECEPCIONISTA` y `ODONTOLOGO` desde **Configuración → Permisos por rol**. El rol `ADMINISTRADOR` conserva acceso total y no es editable.
 
 ### Ejecutar el backend
 
@@ -181,6 +184,17 @@ Los enlaces de recuperación:
 | `GET` | `/api/auth/users/` | Administrador | Lista los usuarios registrados. |
 | `POST` | `/api/auth/users/` | Administrador | Registra un usuario con sus credenciales y rol. |
 | `PATCH` | `/api/auth/users/{id}/` | Administrador | Actualiza datos, rol y estado activo de un usuario. |
+| `GET` | `/api/auth/role-permissions/` | Administrador | Lista el catálogo y los presets editables por rol. |
+| `PATCH` | `/api/auth/role-permissions/{role}/` | Administrador | Reemplaza el preset global de un rol editable. |
+
+## Endpoints de pacientes
+
+| Método | Endpoint | Autorización | Descripción |
+|---|---|---:|---|
+| `GET` | `/api/patients/` | `patients.view` | Lista pacientes y permite buscar con `?search=`. |
+| `POST` | `/api/patients/` | `patients.create` | Registra un paciente y genera su código clínico. |
+| `GET` | `/api/patients/{id}/` | `patients.view` | Abre el expediente base del paciente. |
+| `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza información personal, contacto y estado del expediente base. |
 
 ## Pruebas y validación
 
@@ -229,12 +243,25 @@ npm run build
 
 1. Inicia sesión con una cuenta de rol `ADMINISTRADOR`.
 2. Abre **Configuración** y selecciona **Gestión de Staff**.
-3. Selecciona **Añadir miembro** y completa los datos, el rol y una contraseña segura.
-4. El usuario creado queda disponible inmediatamente para iniciar sesión.
+3. Consulta la lista completa de usuarios con su rol y estado activo o inactivo.
+4. Selecciona **Añadir miembro** y completa los datos, el rol y una contraseña segura.
+5. El usuario creado queda disponible inmediatamente para iniciar sesión.
+6. Abre **Permisos por rol** para definir los accesos globales de recepcionistas y odontólogos.
 
-Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos y el estado activo de una cuenta sin mostrar ni modificar su contraseña. HU-08 utiliza el selector de rol del mismo formulario para vincular al perfil los permisos correspondientes.
+Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos sin mostrar ni modificar la contraseña. HU-07 permite desactivar la cuenta sin eliminarla, HU-08 asigna el rol y sus permisos, y HU-09 presenta todos los usuarios con su rol y estado.
 
 La aplicación rechaza correos ya registrados, incluso si se escriben usando una combinación diferente de mayúsculas y minúsculas. Los usuarios sin rol administrador no pueden acceder a esta pantalla ni a sus endpoints.
+
+### Registro de pacientes
+
+1. Inicia sesión con una cuenta que tenga `patients.view` y `patients.create`.
+2. Selecciona **Nuevo paciente** desde el dashboard o desde **Pacientes**; ambas acciones abren el mismo formulario.
+3. Completa los datos personales obligatorios y guarda.
+4. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
+
+El expediente inicial presenta la información personal y el contacto de emergencia. Las secciones clínicas aún no implementadas se muestran vacías de forma explícita, sin inventar información médica.
+
+Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso aparecen los botones **Editar** en información personal y contacto de emergencia; ambos reutilizan el formulario y actualizan la vista después de guardar.
 
 ## Consideraciones para producción
 
@@ -251,4 +278,4 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06 y HU-08 están implementadas y cuentan con pruebas automatizadas. HU-05 registra usuarios, HU-06 modifica su información y HU-08 asigna sus roles y permisos. Los módulos de pacientes, clínicas y citas conservan su estructura inicial para desarrollarse en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09 y HU-10 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes ya permite registrar, buscar y abrir expedientes base; las funciones clínicas avanzadas, clínicas y citas continúan en historias posteriores.

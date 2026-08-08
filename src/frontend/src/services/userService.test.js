@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createUser, listUsers, updateUser } from './userService'
+import {
+  createUser,
+  listRolePermissionPresets,
+  listUsers,
+  updateRolePermissionPreset,
+  updateUser,
+} from './userService'
 
 const response = (data, status = 200) => ({
   ok: status >= 200 && status < 300,
@@ -66,6 +72,39 @@ describe('userService', () => {
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify(changes),
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    )
+  })
+
+  it('lists role permission presets with bearer authentication', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ presets: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listRolePermissionPresets('access-token')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/auth/role-permissions/',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    )
+  })
+
+  it('replaces a role permission preset with PATCH', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({
+      role: 'ODONTOLOGO',
+      permissions: ['patients.view'],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await updateRolePermissionPreset('access-token', 'ODONTOLOGO', ['patients.view'])
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/auth/role-permissions/ODONTOLOGO/',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ permissions: ['patients.view'] }),
         headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
       }),
     )

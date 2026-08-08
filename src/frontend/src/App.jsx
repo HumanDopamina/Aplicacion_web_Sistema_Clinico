@@ -6,13 +6,18 @@ import PasswordResetRequestPage from './pages/Auth/PasswordResetRequestPage'
 import PasswordResetConfirmPage from './pages/Auth/PasswordResetConfirmPage'
 import ChangePasswordPage from './pages/Auth/ChangePasswordPage'
 import SettingsPage from './pages/Settings/SettingsPage'
+import PatientsPage from './pages/Patients/PatientsPage'
+import PatientDetailPage from './pages/Patients/PatientDetailPage'
 import Navbar from './components/Navbar'
 import Sidebar from './components/Sidebar'
 
-function ProtectedLayout({ children, allowedRoles }) {
+function ProtectedLayout({ children, allowedRoles, requiredPermission }) {
   const { user } = useAuth()
   if (!user) return <Navigate to="/login" replace />
   if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to="/bienvenida" replace />
+  }
+  if (requiredPermission && user.role !== 'ADMINISTRADOR' && !user.permissions?.includes(requiredPermission)) {
     return <Navigate to="/bienvenida" replace />
   }
   return (
@@ -38,7 +43,8 @@ export default function App() {
     <Route path="/bienvenida" element={<ProtectedLayout><WelcomePage /></ProtectedLayout>} />
     <Route path="/cambiar-contrasena" element={<ProtectedLayout><ChangePasswordPage /></ProtectedLayout>} />
     <Route path="/usuarios" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Usuarios" /></ProtectedLayout>} />
-    <Route path="/pacientes" element={<ProtectedLayout><ModulePage title="Pacientes" /></ProtectedLayout>} />
+    <Route path="/pacientes" element={<ProtectedLayout requiredPermission="patients.view"><PatientsPage /></ProtectedLayout>} />
+    <Route path="/pacientes/:id" element={<ProtectedLayout requiredPermission="patients.view"><PatientDetailPage /></ProtectedLayout>} />
     <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Clínicas" /></ProtectedLayout>} />
     <Route path="/citas" element={<ProtectedLayout><ModulePage title="Citas" /></ProtectedLayout>} />
     <Route path="/configuracion" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><SettingsPage /></ProtectedLayout>} />

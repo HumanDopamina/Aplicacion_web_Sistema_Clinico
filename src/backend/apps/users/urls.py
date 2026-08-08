@@ -8,6 +8,8 @@ from .views import (
     LogoutView,
     PasswordResetConfirmView,
     PasswordResetRequestView,
+    RolePermissionPresetCollectionView,
+    RolePermissionPresetDetailView,
     UserCollectionView,
     UserDetailView,
 )
@@ -28,4 +30,14 @@ urlpatterns = [
     path("me/", CurrentUserView.as_view(), name="current-user"),
     path("users/", UserCollectionView.as_view(), name="user-list"),
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
+    path(
+        "role-permissions/",
+        RolePermissionPresetCollectionView.as_view(),
+        name="role-permission-list",
+    ),
+    path(
+        "role-permissions/<str:role>/",
+        RolePermissionPresetDetailView.as_view(),
+        name="role-permission-detail",
+    ),
 ]

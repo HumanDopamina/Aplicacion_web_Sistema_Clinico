@@ -8,7 +8,8 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import User
+from .models import RolePermissionPreset, User
+from .permissions import PERMISSION_CODES, get_effective_permissions, order_permissions
 
 
 class LoginSerializer(TokenObtainPairSerializer):
@@ -45,6 +46,7 @@ class LoginSerializer(TokenObtainPairSerializer):
                 "email": user.email,
                 "first_name": user.first_name,
                 "role": user.role,
+                "permissions": get_effective_permissions(user),
             },
         }
 
@@ -212,3 +214,18 @@ class UserAdminUpdateSerializer(serializers.ModelSerializer):
                 "Ya existe un usuario con este correo electrónico."
             )
         return email
+
+
+class RolePermissionPresetSerializer(serializers.ModelSerializer):
+    permissions = serializers.ListField(
+        child=serializers.ChoiceField(choices=PERMISSION_CODES),
+        allow_empty=True,
+    )
+
+    class Meta:
+        model = RolePermissionPreset
+        fields = ("role", "permissions")
+        read_only_fields = ("role",)
+
+    def validate_permissions(self, value):
+        return order_permissions(value)
