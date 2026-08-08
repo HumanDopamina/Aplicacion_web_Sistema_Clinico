@@ -202,7 +202,7 @@ describe('authenticated routes', () => {
     expect(screen.getByRole('heading', { name: 'Datos generales de la consulta' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Interrogatorio por aparatos y sistemas' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Examen físico' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Archivos clínicos' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Archivos clínicos' })).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Nombres'), { target: { value: 'María Fernanda' } })
     fireEvent.change(screen.getByLabelText('Primer apellido'), { target: { value: 'García' } })
     fireEvent.change(screen.getByLabelText('Segundo apellido'), { target: { value: 'López' } })
@@ -218,7 +218,6 @@ describe('authenticated routes', () => {
     fireEvent.change(screen.getByLabelText('Aspecto general'), { target: { value: 'Consciente y orientada.' } })
     fireEvent.change(screen.getByLabelText('Diagnóstico / problemas odontológicos'), { target: { value: 'Pulpitis irreversible en pieza 46.' } })
     fireEvent.change(screen.getByLabelText('Plan de tratamiento'), { target: { value: 'Tratamiento endodóntico y corona.' } })
-    fireEvent.change(screen.getByLabelText('Exámenes radiográficos'), { target: { value: 'periapical-46.pdf' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar expediente' }))
 
     expect(await screen.findByRole('heading', { name: 'María Fernanda García López' })).toBeInTheDocument()
@@ -226,7 +225,6 @@ describe('authenticated routes', () => {
     expect(submittedPatient.clinical_record.examiner_name).toBe('Dra. Elena Ruiz')
     expect(submittedPatient.clinical_record.chief_complaint).toBe('Dolor en molar inferior derecho.')
     expect(submittedPatient.clinical_record.blood_pressure).toBe('118/76')
-    expect(submittedPatient.clinical_record.radiographic_exams).toEqual(['periapical-46.pdf'])
   })
 
   it('[HU-10] displays the complete clinical record fields', async () => {
@@ -252,8 +250,16 @@ describe('authenticated routes', () => {
     expect(screen.getByText('Tratamiento endodóntico y corona.')).toBeInTheDocument()
     expect(screen.getByText('C$ 10,500.')).toBeInTheDocument()
     expect(screen.getByText('Radiografía periapical diagnóstica.')).toBeInTheDocument()
-    expect(screen.getByText('periapical-46.pdf')).toBeInTheDocument()
-    expect(screen.getByText('pieza-46-frontal.jpg')).toBeInTheDocument()
+  })
+
+  it('[HU-10] reserves clinical files for the Documents tab', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(patientFixture)))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1')
+
+    expect(await screen.findByRole('heading', { name: 'María Fernanda García López' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Archivos clínicos' })).not.toBeInTheDocument()
+    expect(screen.queryByText('periapical-46.pdf')).not.toBeInTheDocument()
+    expect(screen.queryByText('pieza-46-frontal.jpg')).not.toBeInTheDocument()
   })
 
   it('[HU-10] edits patient information from the clinical record when permitted', async () => {

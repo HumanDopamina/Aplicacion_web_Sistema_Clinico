@@ -93,11 +93,6 @@ function DiseaseGroup({ title, values, labels, isEditing, onChange }) {
   return <div><h3 className="mb-3 text-sm font-semibold text-slate-800">{title}</h3>{isEditing ? <div className="grid gap-2 sm:grid-cols-2">{Object.entries(labels).map(([name, label]) => <label key={name} className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={Boolean(values?.[name])} onChange={(event) => onChange(name, event.target.checked)} className="h-4 w-4 accent-blue-700" />{label}</label>)}<label className="grid gap-1 text-xs font-medium text-slate-700 sm:col-span-2">Otros<input aria-label={`${title}: otros`} value={values?.other || ''} onChange={(event) => onChange('other', event.target.value)} className={inputClass} /></label></div> : active.length > 0 ? <ul className="flex flex-wrap gap-2">{active.map((label) => <li key={label} className="rounded-full bg-cyan-50 px-3 py-1 text-xs font-semibold text-cyan-800">{label}</li>)}</ul> : <p className="text-sm italic text-slate-400">Sin información registrada</p>}</div>
 }
 
-function FileGroup({ title, field, values, form, isEditing, onChange }) {
-  if (isEditing) return <RecordValue label={title} field={field} type="textarea" form={form} isEditing onChange={onChange} />
-  return <div><h3 className="mb-3 text-sm font-semibold text-slate-800">{title}</h3>{values?.length > 0 ? <ul className="space-y-2">{values.map((value) => <li key={value} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">{value}</li>)}</ul> : <p className="text-sm italic text-slate-400">Sin información registrada</p>}</div>
-}
-
 export default function PatientRecordPage({ isNew = false }) {
   const { id } = useParams()
   const { user, accessToken } = useAuth()
@@ -194,7 +189,6 @@ export default function PatientRecordPage({ isNew = false }) {
         ['Observaciones y análisis', 'Observaciones y análisis', 'observations_analysis'], ['Diagnósticos o problemas odontológicos', 'Diagnóstico / problemas odontológicos', 'dental_diagnoses'],
         ['Plan de tratamiento odontológico', 'Plan de tratamiento', 'treatment_plan'], ['Presupuesto', 'Presupuesto / descripción', 'budget'], ['Tratamiento realizado', 'Tratamiento realizado', 'treatment_performed'],
       ].map(([titleText, label, field]) => <SectionCard key={field} title={titleText}><RecordValue label={label} value={recordSource[field]} field={field} type="textarea" form={form} isEditing={isEditing} onChange={update} /></SectionCard>)}
-      <SectionCard title="Archivos clínicos"><div className="grid gap-5 sm:grid-cols-2"><FileGroup title="Exámenes radiográficos" field="radiographic_exams" values={record.radiographic_exams} form={form} isEditing={isEditing} onChange={update} /><FileGroup title="Fotografías clínicas" field="clinical_photographs" values={record.clinical_photographs} form={form} isEditing={isEditing} onChange={update} /></div></SectionCard>
     </div>
   </form>
 }

@@ -16,7 +16,8 @@
 - Alta, visualización y edición usan una sola vista principal inspirada en Odoo: conservan el encabezado, las tarjetas, la distribución y las tabs **Resumen clínico**, **Consultas**, **Odontograma** y **Documentos**.
 - `/pacientes/nuevo` activa `isNew=true` e `isEditing=true`; `/pacientes/{id}` inicia en lectura con ambos estados desactivados.
 - El dashboard consulta el mismo listado persistido que `/pacientes`, actualiza el total y muestra hasta los cuatro registros más recientes con acceso directo a su expediente.
-- El formulario reúne en trece secciones los datos personales, consulta inicial, motivo, enfermedad actual, interrogatorio por sistemas, antecedentes familiares, enfermedades infectocontagiosas y hereditarias, examen físico, observaciones, diagnóstico, plan, presupuesto, tratamiento y referencias de archivos clínicos.
+- El formulario reúne en doce secciones los datos personales, consulta inicial, motivo, enfermedad actual, interrogatorio por sistemas, antecedentes familiares, enfermedades infectocontagiosas y hereditarias, examen físico, observaciones, diagnóstico, plan, presupuesto y tratamiento.
+- **Resumen clínico** no muestra ni edita una tarjeta de archivos clínicos. Radiografías, fotografías y demás adjuntos se gestionarán exclusivamente desde la pestaña **Documentos**.
 - Son obligatorios: nombres, primer apellido, lugar de nacimiento, cédula, género y fecha de nacimiento.
 - La API rechaza fechas futuras y cédulas duplicadas sin distinguir mayúsculas/minúsculas.
 - El sistema genera el código inmutable `PAC-00001` a partir del identificador interno.
@@ -55,7 +56,7 @@
 ## Decisiones de alcance
 
 - La edad se deriva de la fecha de nacimiento y no se almacena como dato duplicado.
-- Las enfermedades se guardan como selecciones estructuradas; las referencias radiográficas y fotográficas se registran por línea. La carga binaria pertenece al futuro módulo documental.
+- Las enfermedades se guardan como selecciones estructuradas. Los campos heredados de referencias radiográficas y fotográficas se conservan temporalmente en el backend para no perder datos existentes, pero quedan fuera del formulario hasta su migración al módulo documental.
 - Los apartados excluidos expresamente por la fuente no forman parte del modelo.
 - Consultas posteriores, odontograma y carga binaria de documentos requieren historias posteriores.
 - La separación por clínica deberá incorporarse cuando exista la relación operativa entre usuarios, clínicas y pacientes.
