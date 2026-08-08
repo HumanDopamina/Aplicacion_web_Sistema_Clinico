@@ -230,6 +230,8 @@ describe('authenticated routes', () => {
     expect(submittedPatient.clinical_record.examiner_name).toBe('Dra. Elena Ruiz')
     expect(submittedPatient.clinical_record.chief_complaint).toBe('Dolor en molar inferior derecho.')
     expect(submittedPatient.clinical_record.blood_pressure).toBe('118/76')
+    expect(submittedPatient.clinical_record.consultation_date).toBeNull()
+    expect(submittedPatient.clinical_record.consultation_time).toBeNull()
   })
 
   it('[HU-10] displays the complete clinical record fields', async () => {

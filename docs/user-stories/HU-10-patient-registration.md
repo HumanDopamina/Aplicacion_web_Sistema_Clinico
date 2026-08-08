@@ -19,6 +19,7 @@
 - El formulario reúne en doce secciones los datos personales, consulta inicial, motivo, enfermedad actual, interrogatorio por sistemas, antecedentes familiares, enfermedades infectocontagiosas y hereditarias, examen físico, observaciones, diagnóstico, plan, presupuesto y tratamiento.
 - **Resumen clínico** no muestra ni edita una tarjeta de archivos clínicos. Radiografías, fotografías y demás adjuntos se gestionarán exclusivamente desde la pestaña **Documentos**.
 - Son obligatorios: nombres, primer apellido, lugar de nacimiento, cédula, género y fecha de nacimiento.
+- La fecha y la hora de la consulta inicial son opcionales; si quedan vacías, el frontend las envía como `null`, de acuerdo con el contrato del expediente clínico.
 - La API rechaza fechas futuras y cédulas duplicadas sin distinguir mayúsculas/minúsculas.
 - El sistema genera el código inmutable `PAC-00001` a partir del identificador interno.
 - Después de guardar, la interfaz navega a `/pacientes/{id}` y muestra el expediente inicial.
@@ -26,6 +27,7 @@
 - No existe un interruptor global de edición. Con `patients.edit`, los valores son controles en línea con apariencia de texto; el borde se revela al pasar el cursor o enfocar el campo.
 - La nube **Guardar cambios** y la X **Descartar cambios** aparecen solo cuando el borrador cambia. Guardar actualiza la línea base; descartar restaura el expediente existente o abandona un alta nueva.
 - Si se intenta navegar, recargar o cerrar con cambios pendientes, el sistema advierte antes de perderlos. Un error de API conserva el borrador para reintentar.
+- Los errores de validación, incluso cuando pertenecen al objeto anidado `clinical_record`, muestran el mensaje específico de la API en lugar de ocultarlo tras un aviso genérico.
 
 ## Modelo y seguridad
 
@@ -50,7 +52,8 @@
 ## Evidencia automatizada
 
 - Backend `[HU-10]`: creación transaccional del paciente y expediente completo, apertura del detalle, código automático, persistencia, búsqueda, permisos editables, acceso administrativo, fecha futura, duplicidad de cédula y campos internos de solo lectura.
-- Frontend `[HU-10]`: una sola vista cubre `isNew`, edición inmediata por permiso, detección de cambios, `POST`, `PATCH`, descarte, errores y protección de navegación conservando estructura y tabs.
+- Frontend `[HU-10]`: una sola vista cubre `isNew`, edición inmediata por permiso, detección de cambios, `POST`, `PATCH`, descarte, errores y protección de navegación conservando estructura y tabs. La creación prueba además la normalización a `null` de fecha/hora opcionales vacías.
+- Cliente API: una prueba de regresión comprueba que los errores anidados del expediente se presentan de forma legible.
 - Dashboard: la acción rápida abre `/pacientes/nuevo` y queda protegida por `patients.create`; el total y los pacientes recientes se cargan desde `GET /api/patients/`.
 - Servicio frontend: listado/búsqueda, creación y detalle con autenticación Bearer.
 - Edición: permiso configurable, rechazo `403`, campos técnicos inmutables, formulario precargado, `PATCH` y actualización visible.

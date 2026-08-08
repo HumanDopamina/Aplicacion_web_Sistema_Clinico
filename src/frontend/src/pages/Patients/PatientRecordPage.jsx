@@ -8,6 +8,7 @@ const dateFormatter = new Intl.DateTimeFormat('es-NI', { day: '2-digit', month: 
 const genderLabels = { FEMENINO: 'Femenino', MASCULINO: 'Masculino', OTRO: 'Otro' }
 const inputClass = '-mx-2 w-[calc(100%+1rem)] rounded-md border border-transparent bg-transparent px-2 py-1.5 text-sm font-medium text-slate-700 outline-none transition placeholder:italic placeholder:text-slate-400 hover:border-slate-200 hover:bg-slate-50 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100'
 const numericFields = new Set(['heart_rate', 'respiratory_rate', 'temperature', 'weight', 'height', 'body_surface_area', 'bmi'])
+const nullableRecordFields = new Set([...numericFields, 'consultation_date', 'consultation_time'])
 
 function makeEmptyForm() {
   return {
@@ -57,7 +58,7 @@ function payloadFromForm(form) {
   const payload = Object.fromEntries(patientFields.map((field) => [field, form[field]]))
   payload.clinical_record = Object.fromEntries(recordFields.map((field) => {
     if (field === 'radiographic_exams' || field === 'clinical_photographs') return [field, lines(form[field])]
-    if (numericFields.has(field)) return [field, form[field] === '' ? null : form[field]]
+    if (nullableRecordFields.has(field)) return [field, form[field] === '' ? null : form[field]]
     return [field, form[field]]
   }))
   payload.clinical_record.infectious_diseases = form.infectious_diseases

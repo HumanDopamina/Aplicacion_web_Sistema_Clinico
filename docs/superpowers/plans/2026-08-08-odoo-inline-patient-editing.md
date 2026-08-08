@@ -75,3 +75,10 @@
 - [x] Run `npm test -- --run`, `npm run lint`, and `npm run build`.
 - [x] Use Playwright to verify existing, dirty, saved, read-only, and new-record states on desktop and mobile with no console errors.
 - [x] Inspect the final diff and commit the scoped changes as `feat: add Odoo-style inline patient editing`.
+
+### Post-implementation regression: optional consultation date and time
+
+- [x] Reproduce the failed patient creation with empty `consultation_date` and `consultation_time` values.
+- [x] Normalize both optional values to `null` before sending the nested clinical record.
+- [x] Surface nested API validation messages instead of the generic request error.
+- [x] Add focused frontend regression coverage and update the HU-10 evidence.
