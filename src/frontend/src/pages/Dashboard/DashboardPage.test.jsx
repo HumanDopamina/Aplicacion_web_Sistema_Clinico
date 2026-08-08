@@ -79,14 +79,14 @@ describe('DashboardPage', () => {
             user={{ first_name: 'Recepción', role: 'RECEPCIONISTA', permissions: ['patients.create'] }}
             accessToken="access-token"
           />} />
-          <Route path="/pacientes/nuevo" element={<h1>Nuevo expediente clínico</h1>} />
+          <Route path="/pacientes/nuevo" element={<h1>Nuevo paciente</h1>} />
         </Routes>
       </MemoryRouter>,
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo paciente' }))
 
-    expect(screen.getByRole('heading', { name: 'Nuevo expediente clínico' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Nuevo paciente' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 

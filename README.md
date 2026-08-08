@@ -255,13 +255,13 @@ La aplicación rechaza correos ya registrados, incluso si se escriben usando una
 ### Registro de pacientes
 
 1. Inicia sesión con una cuenta que tenga `patients.view` y `patients.create`.
-2. Selecciona **Nuevo paciente** desde el dashboard o desde **Pacientes**; ambas acciones abren `/pacientes/nuevo` como una vista completa, sin modal.
+2. Selecciona **Nuevo paciente** desde el dashboard o desde **Pacientes**; ambas acciones abren `/pacientes/nuevo` usando la misma ficha visual que muestra un expediente existente.
 3. Completa la identidad y las secciones clínicas disponibles y selecciona **Guardar expediente**.
 4. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
 
 El expediente presenta datos de consulta, información personal, anamnesis, antecedentes, examen físico, diagnóstico, plan, presupuesto, tratamiento y referencias clínicas. Los valores opcionales no capturados se muestran vacíos de forma explícita, sin inventar información médica.
 
-Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso aparece **Editar expediente**, que abre la vista completa precargada y actualiza tanto `Patient` como `ClinicalRecord`.
+Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso, **Editar expediente** convierte los valores de las mismas tarjetas en controles editables, sin cambiar de página; **Cancelar** restaura los valores persistidos y **Guardar expediente** actualiza `Patient` y `ClinicalRecord`.
 
 ## Consideraciones para producción
 

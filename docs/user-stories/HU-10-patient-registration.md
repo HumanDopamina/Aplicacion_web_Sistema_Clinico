@@ -13,7 +13,8 @@
 ## Alcance implementado
 
 - La recepcionista con el permiso `patients.create` puede abrir **Nuevo paciente** desde `/pacientes` o el dashboard; ambas acciones navegan a `/pacientes/nuevo`.
-- El alta se realiza en una página completa inspirada en las vistas de registro de Odoo, no en un diálogo modal.
+- Alta, visualización y edición usan una sola vista principal inspirada en Odoo: conservan el encabezado, las tarjetas, la distribución y las tabs **Resumen clínico**, **Consultas**, **Odontograma** y **Documentos**.
+- `/pacientes/nuevo` activa `isNew=true` e `isEditing=true`; `/pacientes/{id}` inicia en lectura con ambos estados desactivados.
 - El dashboard consulta el mismo listado persistido que `/pacientes`, actualiza el total y muestra hasta los cuatro registros más recientes con acceso directo a su expediente.
 - El formulario reúne en trece secciones los datos personales, consulta inicial, motivo, enfermedad actual, interrogatorio por sistemas, antecedentes familiares, enfermedades infectocontagiosas y hereditarias, examen físico, observaciones, diagnóstico, plan, presupuesto, tratamiento y referencias de archivos clínicos.
 - Son obligatorios: nombres, primer apellido, lugar de nacimiento, cédula, género y fecha de nacimiento.
@@ -21,7 +22,7 @@
 - El sistema genera el código inmutable `PAC-00001` a partir del identificador interno.
 - Después de guardar, la interfaz navega a `/pacientes/{id}` y muestra el expediente inicial.
 - El expediente de lectura conserva el diseño de tarjetas existente y presenta todos los valores persistidos; los opcionales vacíos se identifican como **Sin información registrada**.
-- **Editar expediente** abre la misma vista completa precargada y requiere `patients.edit`.
+- **Editar expediente** activa los controles dentro de las mismas tarjetas, sin navegar a una página `/editar`; cancelar restaura los valores persistidos y guardar regresa al modo lectura.
 
 ## Modelo y seguridad
 
@@ -46,7 +47,7 @@
 ## Evidencia automatizada
 
 - Backend `[HU-10]`: creación transaccional del paciente y expediente completo, apertura del detalle, código automático, persistencia, búsqueda, permisos editables, acceso administrativo, fecha futura, duplicidad de cédula y campos internos de solo lectura.
-- Frontend `[HU-10]`: listado o dashboard → página completa → `POST` anidado → navegación automática → expediente clínico visible.
+- Frontend `[HU-10]`: una sola vista cubre `isNew`/`isEditing`, `POST` de alta, `PATCH` en línea, cancelación sin persistir y regreso a lectura conservando estructura y tabs.
 - Dashboard: la acción rápida abre `/pacientes/nuevo` y queda protegida por `patients.create`; el total y los pacientes recientes se cargan desde `GET /api/patients/`.
 - Servicio frontend: listado/búsqueda, creación y detalle con autenticación Bearer.
 - Edición: permiso configurable, rechazo `403`, campos técnicos inmutables, formulario precargado, `PATCH` y actualización visible.

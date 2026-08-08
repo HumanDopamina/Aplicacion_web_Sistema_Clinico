@@ -193,8 +193,12 @@ describe('authenticated routes', () => {
     renderAuthenticated('RECEPCIONISTA', false, '/pacientes')
 
     fireEvent.click(await screen.findByRole('button', { name: 'Nuevo paciente' }))
-    expect(screen.getByRole('heading', { name: 'Nuevo expediente clínico' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Nuevo paciente' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByText('Resumen clínico')).toBeInTheDocument()
+    expect(screen.getByText('Consultas')).toBeInTheDocument()
+    expect(screen.getByText('Odontograma')).toBeInTheDocument()
+    expect(screen.getByText('Documentos')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Datos generales de la consulta' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Interrogatorio por aparatos y sistemas' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Examen físico' })).toBeInTheDocument()
@@ -267,10 +271,17 @@ describe('authenticated routes', () => {
     vi.stubGlobal('fetch', fetchMock)
     renderAuthenticated('RECEPCIONISTA', false, '/pacientes/1')
 
-    fireEvent.click(await screen.findByRole('link', { name: 'Editar expediente' }))
-    expect(await screen.findByRole('heading', { name: 'Editar expediente clínico' })).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar expediente' }))
+    expect(screen.getByRole('heading', { name: 'María Fernanda García López' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Nombres')).toHaveValue('María Fernanda')
+    fireEvent.change(screen.getByLabelText('Dirección habitual'), { target: { value: 'Cambio descartado' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancelar edición' }))
+
+    expect(screen.queryByLabelText('Dirección habitual')).not.toBeInTheDocument()
+    expect(screen.getByText('Colonia Roma Norte')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Editar expediente' }))
     fireEvent.change(screen.getByLabelText('Dirección habitual'), { target: { value: 'Residencial Las Colinas' } })
     fireEvent.change(screen.getByLabelText('Teléfono de emergencia'), { target: { value: '+505 7777 3333' } })
     fireEvent.change(screen.getByLabelText('Motivo de consulta'), { target: { value: 'Control posterior al tratamiento.' } })
@@ -280,7 +291,7 @@ describe('authenticated routes', () => {
     expect(screen.getByText('+505 7777 3333')).toBeInTheDocument()
     expect(screen.getByText('Control posterior al tratamiento.')).toBeInTheDocument()
     expect(submittedChanges.clinical_record.chief_complaint).toBe('Control posterior al tratamiento.')
-    expect(screen.getByRole('link', { name: 'Editar expediente' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Editar expediente' })).toBeInTheDocument()
   })
 
   it('[HU-10] hides patient editing actions without the configured permission', async () => {
@@ -288,6 +299,6 @@ describe('authenticated routes', () => {
     renderAuthenticated('ODONTOLOGO', false, '/pacientes/1')
 
     expect(await screen.findByRole('heading', { name: 'María Fernanda García López' })).toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Editar expediente' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Editar expediente' })).not.toBeInTheDocument()
   })
 })
