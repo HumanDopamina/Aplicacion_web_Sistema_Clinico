@@ -1,10 +1,11 @@
+from django.shortcuts import get_object_or_404
 from rest_framework import filters, generics
 from rest_framework.permissions import IsAuthenticated
 
 from apps.users.permissions import HasCapability
 
-from .models import Patient
-from .serializers import PatientSerializer
+from .models import Consultation, Patient
+from .serializers import ConsultationSerializer, PatientSerializer
 
 
 class PatientListCreateView(generics.ListCreateAPIView):
@@ -39,3 +40,14 @@ class PatientDetailView(generics.RetrieveUpdateAPIView):
         "PATCH": "patients.edit",
     }
     http_method_names = ("get", "patch", "head", "options")
+
+
+class PatientConsultationListView(generics.ListAPIView):
+    serializer_class = ConsultationSerializer
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "patients.view"}
+
+    def get_queryset(self):
+        pk = self.kwargs["pk"]
+        get_object_or_404(Patient, pk=pk)
+        return Consultation.objects.select_related("professional").filter(patient_id=pk)

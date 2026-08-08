@@ -1,3 +1,4 @@
+from django.apps import apps
 from rest_framework.test import APITestCase
 
 from apps.users.models import RolePermissionPreset, User
@@ -267,3 +268,72 @@ class PatientApiTests(APITestCase):
         self.client.force_authenticate(self.admin)
         detail = self.client.get(f"{self.list_url}{created.data['id']}/")
         self.assertEqual(detail.data["address"], "Colonia Roma Norte")
+
+    def test_patient_consultations_returns_an_empty_history_for_an_authorized_user(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(self.list_url, self.payload(), format="json")
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.get(
+            f"{self.list_url}{created.data['id']}/consultations/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+    def test_patient_consultations_requires_patient_view_permission(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(self.list_url, self.payload(), format="json")
+        preset = RolePermissionPreset.objects.get(role=User.Role.RECEPCIONISTA)
+        preset.permissions = ["patients.create"]
+        preset.save(update_fields=["permissions"])
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.get(
+            f"{self.list_url}{created.data['id']}/consultations/"
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_patient_consultations_returns_persisted_rows_newest_first(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(self.list_url, self.payload(), format="json")
+        patient = apps.get_model("patients", "Patient").objects.get(
+            pk=created.data["id"]
+        )
+        try:
+            consultation_model = apps.get_model("patients", "Consultation")
+        except LookupError:
+            self.fail("The persisted Consultation model is missing.")
+        self.dentist.first_name = "Elena"
+        self.dentist.last_name = "Rivera"
+        self.dentist.save(update_fields=["first_name", "last_name"])
+        consultation_model.objects.create(
+            patient=patient,
+            professional=self.dentist,
+            date="2026-08-01",
+            consultation_type="GENERAL",
+            summary="Revisión de signos vitales.",
+            status="COMPLETADA",
+        )
+        consultation_model.objects.create(
+            patient=patient,
+            professional=self.dentist,
+            date="2026-08-08",
+            consultation_type="SEGUIMIENTO",
+            summary="Paciente estable y continúa el tratamiento.",
+            status="COMPLETADA",
+        )
+
+        response = self.client.get(
+            f"{self.list_url}{created.data['id']}/consultations/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data[0]["date"], "2026-08-08")
+        self.assertEqual(response.data[0]["consultation_type"], "SEGUIMIENTO")
+        self.assertEqual(response.data[0]["consultation_type_display"], "Seguimiento")
+        self.assertEqual(response.data[0]["professional_name"], "Elena Rivera")
+        self.assertEqual(response.data[0]["status_display"], "Completada")
+        self.assertEqual(response.data[1]["date"], "2026-08-01")

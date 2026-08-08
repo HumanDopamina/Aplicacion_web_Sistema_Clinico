@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createPatient, getPatient, listPatients } from './patientService'
+import { createPatient, getPatient, listPatientConsultations, listPatients } from './patientService'
 import * as patientService from './patientService'
 import { apiRequest } from './api'
 
@@ -26,6 +26,13 @@ describe('patientService', () => {
   it('loads the generated clinical record', () => {
     getPatient('token', 7)
     expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/', {
+      headers: { Authorization: 'Bearer token' },
+    })
+  })
+
+  it('loads the consultations scoped to a patient', () => {
+    listPatientConsultations('token', 7)
+    expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/consultations/', {
       headers: { Authorization: 'Bearer token' },
     })
   })

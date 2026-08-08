@@ -3,7 +3,7 @@ from datetime import date
 from django.db import transaction
 from rest_framework import serializers
 
-from .models import ClinicalRecord, Patient
+from .models import ClinicalRecord, Consultation, Patient
 
 
 class ClinicalRecordSerializer(serializers.ModelSerializer):
@@ -89,3 +89,33 @@ class PatientSerializer(serializers.ModelSerializer):
                 setattr(record, field, value)
             record.save()
         return patient
+
+
+class ConsultationSerializer(serializers.ModelSerializer):
+    consultation_type_display = serializers.CharField(
+        source="get_consultation_type_display",
+        read_only=True,
+    )
+    professional_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = Consultation
+        fields = (
+            "id",
+            "date",
+            "consultation_type",
+            "consultation_type_display",
+            "professional",
+            "professional_name",
+            "summary",
+            "status",
+            "status_display",
+        )
+        read_only_fields = fields
+
+    def get_professional_name(self, consultation):
+        return (
+            consultation.professional.get_full_name().strip()
+            or consultation.professional.email
+        )

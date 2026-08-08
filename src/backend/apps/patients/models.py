@@ -125,3 +125,44 @@ class ClinicalRecord(models.Model):
 
     def __str__(self):
         return f"Expediente · {self.patient}"
+
+
+class Consultation(models.Model):
+    class Type(models.TextChoices):
+        INITIAL_ASSESSMENT = "VALORACION_INICIAL", "Valoración inicial"
+        GENERAL = "GENERAL", "Consulta general"
+        FOLLOW_UP = "SEGUIMIENTO", "Seguimiento"
+        EMERGENCY = "URGENCIA", "Urgencia"
+
+    class Status(models.TextChoices):
+        COMPLETED = "COMPLETADA", "Completada"
+        IN_PROGRESS = "EN_PROGRESO", "En progreso"
+        CANCELLED = "CANCELADA", "Cancelada"
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.CASCADE,
+        related_name="consultations",
+    )
+    professional = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="patient_consultations",
+    )
+    date = models.DateField()
+    consultation_type = models.CharField(max_length=24, choices=Type.choices)
+    summary = models.TextField()
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.COMPLETED,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-date", "-created_at")
+        indexes = (models.Index(fields=("patient", "-date")),)
+
+    def __str__(self):
+        return f"{self.get_consultation_type_display()} · {self.patient} · {self.date}"

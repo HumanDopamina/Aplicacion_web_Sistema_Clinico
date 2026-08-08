@@ -17,6 +17,10 @@ export const getPatient = (access, id) => apiRequest(`/api/patients/${id}/`, {
   headers: authorization(access),
 })
 
+export const listPatientConsultations = (access, id) => apiRequest(`/api/patients/${id}/consultations/`, {
+  headers: authorization(access),
+})
+
 export const updatePatient = (access, id, changes) => apiRequest(`/api/patients/${id}/`, {
   method: 'PATCH',
   body: JSON.stringify(changes),

@@ -66,6 +66,18 @@ const patientFixture = {
   },
 }
 
+const consultationFixture = {
+  id: 12,
+  date: '2026-08-08',
+  consultation_type: 'SEGUIMIENTO',
+  consultation_type_display: 'Seguimiento',
+  professional: 3,
+  professional_name: 'Dra. Elena Rivera',
+  summary: 'Paciente estable. Continúa con el tratamiento indicado.',
+  status: 'COMPLETADA',
+  status_display: 'Completada',
+}
+
 const session = (role) => ({
   access: 'access-token',
   refresh: 'refresh-token',
@@ -267,6 +279,53 @@ describe('authenticated routes', () => {
     expect(screen.queryByRole('heading', { name: 'Archivos clínicos' })).not.toBeInTheDocument()
     expect(screen.queryByText('periapical-46.pdf')).not.toBeInTheDocument()
     expect(screen.queryByText('pieza-46-frontal.jpg')).not.toBeInTheDocument()
+  })
+
+  it('shows the persisted consultations for the current patient', async () => {
+    const fetchMock = vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/')) {
+        return Promise.resolve(jsonResponse([consultationFixture]))
+      }
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1')
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Consultas' }))
+
+    expect(await screen.findByRole('heading', { name: 'Consultas del paciente' })).toBeInTheDocument()
+    const row = screen.getByRole('row', { name: /08 ago 2026 Seguimiento Dra\. Elena Rivera/ })
+    expect(within(row).getByText('Paciente estable. Continúa con el tratamiento indicado.')).toBeInTheDocument()
+    expect(within(row).getByText('Completada')).toBeInTheDocument()
+  })
+
+  it('shows guidance when the patient does not have consultations', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/')) return Promise.resolve(jsonResponse([]))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1')
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Consultas' }))
+
+    expect(await screen.findByText('Este paciente todavía no tiene consultas registradas.')).toBeInTheDocument()
+  })
+
+  it('shows the API error when consultations cannot be loaded', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/')) {
+        return Promise.resolve(jsonResponse({ detail: 'No fue posible cargar las consultas.' }, 500))
+      }
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1')
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Consultas' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No fue posible cargar las consultas.')
   })
 
   it('[HU-10] edits patient information from the clinical record when permitted', async () => {

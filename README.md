@@ -263,6 +263,8 @@ El expediente presenta datos de consulta, información personal, anamnesis, ante
 
 Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso, los campos de las mismas tarjetas son editables directamente y conservan apariencia de texto hasta recibir foco. La nube **Guardar cambios** y la X **Descartar cambios** aparecen únicamente cuando el borrador difiere de la última versión guardada; la aplicación advierte antes de abandonar cambios pendientes.
 
+La pestaña **Consultas** muestra el historial clínico persistido del paciente en orden descendente por fecha. Cada registro identifica el tipo, profesional, resumen y estado; la lectura usa `patients.view`. El alta y el detalle ampliado de una consulta se incorporarán en un incremento posterior.
+
 ## Consideraciones para producción
 
 Antes de desplegar el sistema:
@@ -278,4 +280,4 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09 y HU-10 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes ya permite registrar, buscar y abrir expedientes base; las funciones clínicas avanzadas, clínicas y citas continúan en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09 y HU-10 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes permite registrar, buscar, abrir y editar expedientes, además de consultar su historial clínico; las funciones de creación de consultas, odontograma, documentos y citas continúan en historias posteriores.
