@@ -14,6 +14,7 @@
 
 - La recepcionista con el permiso `patients.create` puede abrir **Nuevo paciente** desde `/pacientes`.
 - **Nuevo paciente** en el dashboard abre el mismo formulario reutilizable y también navega al expediente después del alta.
+- El dashboard consulta el mismo listado persistido que `/pacientes`, actualiza el total y muestra hasta los cuatro registros más recientes con acceso directo a su expediente.
 - El formulario registra nombres, apellidos, lugar y fecha de nacimiento, género, cédula, contacto, dirección y contacto de emergencia.
 - Son obligatorios: nombres, primer apellido, lugar de nacimiento, cédula, género y fecha de nacimiento.
 - La API rechaza fechas futuras y cédulas duplicadas sin distinguir mayúsculas/minúsculas.
@@ -45,7 +46,7 @@
 
 - Backend `[HU-10]`: creación por recepcionista, apertura del detalle, código automático, persistencia, búsqueda, permisos editables, acceso administrativo, fecha futura, duplicidad de cédula y campos internos de solo lectura.
 - Frontend `[HU-10]`: listado vacío → formulario → `POST` → navegación automática → nombre y código visibles en el expediente.
-- Dashboard: la acción rápida abre el diálogo real de registro y queda protegida por `patients.create`.
+- Dashboard: la acción rápida abre el diálogo real de registro y queda protegida por `patients.create`; el total y los pacientes recientes se cargan desde `GET /api/patients/`.
 - Servicio frontend: listado/búsqueda, creación y detalle con autenticación Bearer.
 - Edición: permiso configurable, rechazo `403`, campos técnicos inmutables, formulario precargado, `PATCH` y actualización visible.
 
