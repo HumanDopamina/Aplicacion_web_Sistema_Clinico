@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useBeforeUnload, useBlocker, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../context/authContextValue'
 import { createPatient, getPatient, updatePatient } from '../../services/patientService'
-import PatientConsultationsPanel from './PatientConsultationsPanel'
+import { PatientHeader, PatientTabs } from './PatientRecordShell'
 import { patientFields, recordFields } from './patientRecordSchema'
 
 const dateFormatter = new Intl.DateTimeFormat('es-NI', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
@@ -124,7 +124,6 @@ export default function PatientRecordPage({ isNew = false }) {
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [activeTab, setActiveTab] = useState('summary')
 
   useEffect(() => {
     if (isNew || !id) return undefined
@@ -202,13 +201,11 @@ export default function PatientRecordPage({ isNew = false }) {
   if (personalSource.national_id) identityParts.push(`Cédula ${personalSource.national_id}`)
   return <form onSubmit={submit} className="mx-auto w-full max-w-6xl">
     <div className="mb-5 flex items-center justify-between gap-4"><Link to="/pacientes" className="text-sm font-medium text-slate-600 no-underline hover:text-blue-700">← Volver a pacientes</Link>{isDirty ? <div aria-label="Acciones de cambios" className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm"><button type="submit" disabled={saving} aria-label="Guardar cambios" title="Guardar cambios" className="grid h-9 w-9 place-items-center rounded-lg text-blue-700 transition hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 disabled:opacity-50">{saving ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" /> : <CloudSaveIcon />}</button><button type="button" onClick={discard} disabled={saving} aria-label="Descartar cambios" title="Descartar cambios" className="grid h-9 w-9 place-items-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200 disabled:opacity-50"><CloseIcon /></button></div> : null}</div>
-    <header className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex flex-col gap-4 sm:flex-row sm:items-center"><span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl bg-cyan-700 font-serif text-2xl font-semibold text-white">{initials}</span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-medium text-slate-500">{patient?.code || 'Código pendiente'}</span><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${form.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{form.is_active ? 'Paciente activo' : 'Paciente inactivo'}</span></div><h1 className="mt-1 font-serif text-3xl font-semibold text-slate-900">{title}</h1><p className="mt-2 text-xs text-slate-500">{identityParts.length > 0 ? identityParts.join(' · ') : 'Completa los datos para crear el expediente clínico.'}</p></div></div></header>
-    <nav aria-label="Secciones del expediente" role="tablist" className="mt-1 flex gap-6 overflow-x-auto border-b border-slate-200 px-4">{[
-      ['summary', 'Resumen clínico', false], ['consultations', 'Consultas', isNew], ['odontogram', 'Odontograma', true], ['documents', 'Documentos', true],
-    ].map(([tab, label, disabled]) => <button key={tab} type="button" role="tab" aria-selected={activeTab === tab} disabled={disabled} onClick={() => setActiveTab(tab)} className={`whitespace-nowrap border-b-2 py-3 text-xs transition-colors ${activeTab === tab ? 'border-blue-600 font-semibold text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'} disabled:cursor-not-allowed disabled:opacity-45`}>{label}</button>)}</nav>
+    <PatientHeader patient={patient} title={title} initials={initials} isActive={form.is_active} identityText={identityParts.length > 0 ? identityParts.join(' · ') : 'Completa los datos para crear el expediente clínico.'} />
+    <PatientTabs patientId={patient?.id} active="summary" isNew={isNew} />
     {error ? <p role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p> : null}
 
-    {activeTab === 'summary' ? <div className="mt-6 grid gap-5 lg:grid-cols-2">
+    <div className="mt-6 grid gap-5 lg:grid-cols-2">
       <SectionCard title="Datos generales de la consulta"><DataGrid form={form} canModify={canModify} onChange={update} items={[
         { label: 'Doctor que examina', value: recordSource.examiner_name, field: 'examiner_name' }, { label: 'N.º de cédula del doctor', value: recordSource.examiner_national_id, field: 'examiner_national_id' },
         { label: 'N.º INSS', value: recordSource.inss_number, field: 'inss_number' }, { label: 'N.º CEMA', value: recordSource.cema_number, field: 'cema_number' },
@@ -243,8 +240,7 @@ export default function PatientRecordPage({ isNew = false }) {
         ['Observaciones y análisis', 'Observaciones y análisis', 'observations_analysis'], ['Diagnósticos o problemas odontológicos', 'Diagnóstico / problemas odontológicos', 'dental_diagnoses'],
         ['Plan de tratamiento odontológico', 'Plan de tratamiento', 'treatment_plan'], ['Presupuesto', 'Presupuesto / descripción', 'budget'], ['Tratamiento realizado', 'Tratamiento realizado', 'treatment_performed'],
       ].map(([titleText, label, field]) => <SectionCard key={field} title={titleText}><RecordValue label={label} value={recordSource[field]} field={field} type="textarea" form={form} canModify={canModify} onChange={update} /></SectionCard>)}
-    </div> : null}
-    {activeTab === 'consultations' && patient ? <PatientConsultationsPanel accessToken={accessToken} patientId={patient.id} /> : null}
+    </div>
     {blocker.state === 'blocked' ? <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4 backdrop-blur-[1px]"><section role="dialog" aria-modal="true" aria-labelledby="unsaved-changes-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"><h2 id="unsaved-changes-title" className="font-serif text-2xl font-semibold text-slate-900">Cambios sin guardar</h2><p className="mt-2 text-sm leading-6 text-slate-600">Hay información del expediente que todavía no se ha guardado. Si sales ahora, esos cambios se perderán.</p><div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" onClick={() => blocker.reset()} className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-200">Seguir editando</button><button type="button" onClick={() => { allowNavigationRef.current = true; blocker.proceed() }} className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200">Descartar y salir</button></div></section></div> : null}
   </form>
 }

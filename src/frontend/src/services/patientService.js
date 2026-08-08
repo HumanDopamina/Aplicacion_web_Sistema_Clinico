@@ -21,6 +21,29 @@ export const listPatientConsultations = (access, id) => apiRequest(`/api/patient
   headers: authorization(access),
 })
 
+export const getPatientConsultation = (access, patientId, consultationId) => apiRequest(
+  `/api/patients/${patientId}/consultations/${consultationId}/`,
+  { headers: authorization(access) },
+)
+
+export const createPatientConsultation = (access, patientId, consultation) => apiRequest(
+  `/api/patients/${patientId}/consultations/`,
+  {
+    method: 'POST',
+    body: JSON.stringify(consultation),
+    headers: authorization(access),
+  },
+)
+
+export const updatePatientConsultation = (access, patientId, consultationId, changes) => apiRequest(
+  `/api/patients/${patientId}/consultations/${consultationId}/`,
+  {
+    method: 'PATCH',
+    body: JSON.stringify(changes),
+    headers: authorization(access),
+  },
+)
+
 export const updatePatient = (access, id, changes) => apiRequest(`/api/patients/${id}/`, {
   method: 'PATCH',
   body: JSON.stringify(changes),

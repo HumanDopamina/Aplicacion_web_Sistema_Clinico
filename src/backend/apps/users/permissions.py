@@ -5,6 +5,9 @@ PERMISSION_CATALOG = (
     {"code": "patients.view", "label": "Ver pacientes", "group": "Pacientes"},
     {"code": "patients.create", "label": "Registrar pacientes", "group": "Pacientes"},
     {"code": "patients.edit", "label": "Editar pacientes", "group": "Pacientes"},
+    {"code": "consultations.view", "label": "Ver consultas", "group": "Consultas"},
+    {"code": "consultations.create", "label": "Registrar consultas", "group": "Consultas"},
+    {"code": "consultations.edit", "label": "Editar consultas", "group": "Consultas"},
     {"code": "appointments.view", "label": "Ver citas", "group": "Citas"},
     {"code": "appointments.create", "label": "Crear citas", "group": "Citas"},
 )
@@ -12,8 +15,21 @@ PERMISSION_CATALOG = (
 PERMISSION_CODES = tuple(item["code"] for item in PERMISSION_CATALOG)
 EDITABLE_ROLES = ("RECEPCIONISTA", "ODONTOLOGO")
 DEFAULT_ROLE_PERMISSIONS = {
-    "RECEPCIONISTA": list(PERMISSION_CODES),
-    "ODONTOLOGO": ["patients.view", "appointments.view"],
+    "RECEPCIONISTA": [
+        "patients.view",
+        "patients.create",
+        "patients.edit",
+        "consultations.view",
+        "appointments.view",
+        "appointments.create",
+    ],
+    "ODONTOLOGO": [
+        "patients.view",
+        "consultations.view",
+        "consultations.create",
+        "consultations.edit",
+        "appointments.view",
+    ],
 }
 
 

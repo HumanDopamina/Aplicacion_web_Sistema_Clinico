@@ -8,9 +8,9 @@ import * as authService from './services/authService'
 vi.mock('./services/authService')
 
 const rolePermissions = {
-  ADMINISTRADOR: ['patients.view', 'patients.create', 'patients.edit', 'appointments.view', 'appointments.create'],
-  RECEPCIONISTA: ['patients.view', 'patients.create', 'patients.edit', 'appointments.view', 'appointments.create'],
-  ODONTOLOGO: ['patients.view', 'appointments.view'],
+  ADMINISTRADOR: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'consultations.create', 'consultations.edit', 'appointments.view', 'appointments.create'],
+  RECEPCIONISTA: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'appointments.view', 'appointments.create'],
+  ODONTOLOGO: ['patients.view', 'consultations.view', 'consultations.create', 'consultations.edit', 'appointments.view'],
 }
 
 const patientFixture = {
@@ -76,6 +76,51 @@ const consultationFixture = {
   summary: 'Paciente estable. Continúa con el tratamiento indicado.',
   status: 'COMPLETADA',
   status_display: 'Completada',
+  patient: 1,
+  time: '09:30:00',
+  examiner_national_id: '001-010180-0003C',
+  inss_number: 'INSS-9081',
+  cema_number: 'CEMA-4402',
+  dental_service: 'Valoración odontológica',
+  chief_complaint: 'Dolor en molar inferior derecho.',
+  present_illness_history: 'Dolor pulsátil de tres días.',
+  respiratory: 'Sin disnea.',
+  cardiovascular: 'Sin dolor precordial.',
+  hepatic_renal: '',
+  gastrointestinal: '',
+  neurological: '',
+  blood_system: '',
+  reproductive_organs: '',
+  heart_rate: 72,
+  respiratory_rate: 16,
+  blood_pressure: '118/76',
+  temperature: '36.6',
+  weight: '68.40',
+  height: '1.65',
+  body_surface_area: '1.76',
+  bmi: '25.12',
+  general_appearance: 'Consciente y orientada.',
+  skin_and_mucosa: '',
+  thorax: '',
+  rib_cage: '',
+  breasts: '',
+  lung_fields: '',
+  cardiac: '',
+  abdomen_pelvis: '',
+  rectal_exam: '',
+  musculoskeletal: '',
+  upper_extremities: '',
+  lower_extremities: '',
+  genitourinary: '',
+  gynecological_exam: '',
+  neurological_exam: '',
+  observations_analysis: 'Evolución favorable.',
+  dental_diagnoses: 'Pulpitis irreversible.',
+  treatment_plan: 'Tratamiento endodóntico.',
+  budget: 'C$ 4,500.',
+  treatment_performed: 'Radiografía diagnóstica.',
+  created_at: '2026-08-08T12:00:00Z',
+  updated_at: '2026-08-08T12:00:00Z',
 }
 
 const session = (role) => ({
@@ -295,7 +340,7 @@ describe('authenticated routes', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Consultas' }))
 
     expect(await screen.findByRole('heading', { name: 'Consultas del paciente' })).toBeInTheDocument()
-    const row = screen.getByRole('row', { name: /08 ago 2026 Seguimiento Dra\. Elena Rivera/ })
+    const row = await screen.findByRole('row', { name: /08 ago 2026 Seguimiento Dra\. Elena Rivera/ })
     expect(within(row).getByText('Paciente estable. Continúa con el tratamiento indicado.')).toBeInTheDocument()
     expect(within(row).getByText('Completada')).toBeInTheDocument()
   })
@@ -326,6 +371,150 @@ describe('authenticated routes', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Consultas' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('No fue posible cargar las consultas.')
+  })
+
+  it('shows consultation actions according to the configured capabilities', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/')) return Promise.resolve(jsonResponse([consultationFixture]))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas')
+
+    expect(await screen.findByRole('link', { name: 'Nueva consulta' })).toHaveAttribute(
+      'href',
+      '/pacientes/1/consultas/nueva',
+    )
+    expect((await screen.findAllByRole('link', { name: 'Ver detalle' }))[0]).toHaveAttribute(
+      'href',
+      '/pacientes/1/consultas/12',
+    )
+
+    cleanup()
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes/1/consultas')
+    expect((await screen.findAllByRole('link', { name: 'Ver detalle' })).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('link', { name: 'Nueva consulta' })).not.toBeInTheDocument()
+  })
+
+  it('opens a new consultation with defaults and every clinical section', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/')) return Promise.resolve(jsonResponse([]))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/nueva')
+
+    expect(await screen.findByRole('heading', { name: 'Nueva consulta' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Fecha')).not.toHaveValue('')
+    expect(screen.getByLabelText('Hora')).not.toHaveValue('')
+    expect(screen.getByLabelText('Estado')).toHaveValue('EN_PROGRESO')
+    expect(screen.getByLabelText('Profesional')).toHaveValue('Usuario')
+    ;[
+      'N.º de cédula del doctor', 'N.º INSS', 'N.º CEMA', 'Servicio odontológico',
+      'Tipo', 'Resumen', 'Motivo de consulta', 'Historia de la enfermedad actual',
+      'Respiratorio', 'Cardiovascular', 'Hepático y renal', 'Gastrointestinal',
+      'Neurológico', 'Sistema sanguíneo', 'Órganos reproductivos', 'Frecuencia cardíaca',
+      'Frecuencia respiratoria', 'Presión arterial', 'Temperatura', 'Peso', 'Talla',
+      'Área de superficie corporal', 'IMC', 'Aspecto general', 'Piel y mucosas', 'Tórax',
+      'Caja torácica', 'Mamas', 'Campos pulmonares', 'Cardíaco', 'Abdomen y pelvis',
+      'Tacto rectal, cuando aplique', 'Musculoesquelético', 'Extremidades superiores',
+      'Extremidades inferiores', 'Genitourinario, cuando aplique', 'Examen ginecológico',
+      'Examen neurológico', 'Observaciones y análisis', 'Diagnóstico / problemas odontológicos',
+      'Plan de tratamiento', 'Presupuesto / descripción', 'Tratamiento realizado',
+    ].forEach((label) => expect(screen.getByLabelText(label)).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Resumen'), { target: { value: 'Borrador' } })
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }))
+    expect(await screen.findByRole('heading', { name: 'Consultas del paciente' })).toBeInTheDocument()
+  })
+
+  it('creates a consultation with the cloud and opens its detail', async () => {
+    let submittedConsultation = null
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/consultations/') && options.method === 'POST') {
+        submittedConsultation = JSON.parse(options.body)
+        return Promise.resolve(jsonResponse({ ...consultationFixture, ...submittedConsultation, consultation_type_display: 'Consulta general' }, 201))
+      }
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse({ ...consultationFixture, ...submittedConsultation, consultation_type_display: 'Consulta general' }))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/nueva')
+
+    fireEvent.change(await screen.findByLabelText('Tipo'), { target: { value: 'GENERAL' } })
+    fireEvent.change(screen.getByLabelText('Resumen'), { target: { value: 'Nueva valoración clínica.' } })
+    fireEvent.change(screen.getByLabelText('Motivo de consulta'), { target: { value: 'Dolor dental.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(submittedConsultation).not.toBeNull())
+    expect(submittedConsultation.status).toBe('EN_PROGRESO')
+    expect(submittedConsultation.chief_complaint).toBe('Dolor dental.')
+    expect(await screen.findByRole('heading', { name: 'Consulta general' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument()
+  })
+
+  it('edits and discards a completed consultation inline', async () => {
+    let patchPayload = null
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/consultations/12/') && options.method === 'PATCH') {
+        patchPayload = JSON.parse(options.body)
+        return Promise.resolve(jsonResponse({ ...consultationFixture, ...patchPayload }))
+      }
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
+
+    expect(await screen.findByLabelText('Resumen')).toHaveValue(consultationFixture.summary)
+    fireEvent.change(screen.getByLabelText('Resumen'), { target: { value: 'Cambio descartado' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }))
+    expect(screen.getByLabelText('Resumen')).toHaveValue(consultationFixture.summary)
+    expect(patchPayload).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('Resumen'), { target: { value: 'Control actualizado.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument())
+    expect(patchPayload.summary).toBe('Control actualizado.')
+    expect(screen.getByLabelText('Resumen')).toHaveValue('Control actualizado.')
+  })
+
+  it('keeps consultation values read-only without edit capability', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes/1/consultas/12')
+
+    expect(await screen.findByText(consultationFixture.summary)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Resumen')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument()
+  })
+
+  it('preserves a consultation draft after an API error and blocks navigation', async () => {
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/consultations/12/') && options.method === 'PATCH') {
+        return Promise.resolve(jsonResponse({ detail: 'No fue posible guardar la consulta.' }, 400))
+      }
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
+      if (url.endsWith('/api/patients/1/consultations/')) return Promise.resolve(jsonResponse([consultationFixture]))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
+
+    fireEvent.change(await screen.findByLabelText('Resumen'), { target: { value: 'Borrador pendiente' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('No fue posible guardar la consulta.')
+    expect(screen.getByLabelText('Resumen')).toHaveValue('Borrador pendiente')
+
+    fireEvent.click(screen.getByRole('link', { name: /Volver a consultas/ }))
+    expect(await screen.findByRole('dialog', { name: 'Cambios sin guardar' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }))
+    expect(screen.getByLabelText('Resumen')).toHaveValue('Borrador pendiente')
   })
 
   it('[HU-10] edits patient information from the clinical record when permitted', async () => {

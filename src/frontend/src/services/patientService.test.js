@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createPatient, getPatient, listPatientConsultations, listPatients } from './patientService'
+import {
+  createPatient,
+  createPatientConsultation,
+  getPatient,
+  getPatientConsultation,
+  listPatientConsultations,
+  listPatients,
+  updatePatientConsultation,
+} from './patientService'
 import * as patientService from './patientService'
 import { apiRequest } from './api'
 
@@ -34,6 +42,29 @@ describe('patientService', () => {
     listPatientConsultations('token', 7)
     expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/consultations/', {
       headers: { Authorization: 'Bearer token' },
+    })
+  })
+
+  it('loads one consultation scoped to its patient', () => {
+    getPatientConsultation('token', 7, 12)
+    expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/consultations/12/', {
+      headers: { Authorization: 'Bearer token' },
+    })
+  })
+
+  it('creates a consultation for a patient', () => {
+    const consultation = { date: '2026-08-08', summary: 'Valoración clínica.' }
+    createPatientConsultation('token', 7, consultation)
+    expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/consultations/', {
+      method: 'POST', body: JSON.stringify(consultation), headers: { Authorization: 'Bearer token' },
+    })
+  })
+
+  it('updates a patient consultation', () => {
+    const changes = { summary: 'Control actualizado.' }
+    updatePatientConsultation('token', 7, 12, changes)
+    expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/consultations/12/', {
+      method: 'PATCH', body: JSON.stringify(changes), headers: { Authorization: 'Bearer token' },
     })
   })
 

@@ -96,26 +96,37 @@ class ConsultationSerializer(serializers.ModelSerializer):
         source="get_consultation_type_display",
         read_only=True,
     )
-    professional_name = serializers.SerializerMethodField()
+    professional_name = serializers.CharField(
+        source="professional_name_snapshot",
+        read_only=True,
+    )
     status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = Consultation
         fields = (
-            "id",
-            "date",
-            "consultation_type",
-            "consultation_type_display",
-            "professional",
-            "professional_name",
-            "summary",
-            "status",
-            "status_display",
+            "id", "patient", "professional", "professional_name", "date", "time",
+            "consultation_type", "consultation_type_display", "summary", "status",
+            "status_display", "examiner_national_id", "inss_number", "cema_number",
+            "dental_service", "chief_complaint", "present_illness_history", "respiratory",
+            "cardiovascular", "hepatic_renal", "gastrointestinal", "neurological",
+            "blood_system", "reproductive_organs", "heart_rate", "respiratory_rate",
+            "blood_pressure", "temperature", "weight", "height", "body_surface_area",
+            "bmi", "general_appearance", "skin_and_mucosa", "thorax", "rib_cage",
+            "breasts", "lung_fields", "cardiac", "abdomen_pelvis", "rectal_exam",
+            "musculoskeletal", "upper_extremities", "lower_extremities", "genitourinary",
+            "gynecological_exam", "neurological_exam", "observations_analysis",
+            "dental_diagnoses", "treatment_plan", "budget", "treatment_performed",
+            "created_at", "updated_at",
         )
-        read_only_fields = fields
-
-    def get_professional_name(self, consultation):
-        return (
-            consultation.professional.get_full_name().strip()
-            or consultation.professional.email
+        read_only_fields = (
+            "id", "patient", "professional", "professional_name",
+            "consultation_type_display", "status_display", "created_at", "updated_at",
         )
+        extra_kwargs = {
+            "date": {"required": True},
+            "time": {"required": True, "allow_null": False},
+            "consultation_type": {"required": True},
+            "summary": {"required": True, "allow_blank": False},
+            "status": {"required": True},
+        }

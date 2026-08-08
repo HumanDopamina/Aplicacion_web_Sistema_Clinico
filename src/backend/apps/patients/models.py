@@ -149,7 +149,9 @@ class Consultation(models.Model):
         on_delete=models.PROTECT,
         related_name="patient_consultations",
     )
+    professional_name_snapshot = models.CharField(max_length=200, blank=True)
     date = models.DateField()
+    time = models.TimeField(null=True, blank=True)
     consultation_type = models.CharField(max_length=24, choices=Type.choices)
     summary = models.TextField()
     status = models.CharField(
@@ -157,12 +159,60 @@ class Consultation(models.Model):
         choices=Status.choices,
         default=Status.COMPLETED,
     )
+    examiner_national_id = models.CharField(max_length=32, blank=True)
+    inss_number = models.CharField(max_length=40, blank=True)
+    cema_number = models.CharField(max_length=40, blank=True)
+    dental_service = models.CharField(max_length=200, blank=True)
+    chief_complaint = models.TextField(blank=True)
+    present_illness_history = models.TextField(blank=True)
+    respiratory = models.TextField(blank=True)
+    cardiovascular = models.TextField(blank=True)
+    hepatic_renal = models.TextField(blank=True)
+    gastrointestinal = models.TextField(blank=True)
+    neurological = models.TextField(blank=True)
+    blood_system = models.TextField(blank=True)
+    reproductive_organs = models.TextField(blank=True)
+    heart_rate = models.PositiveSmallIntegerField(null=True, blank=True)
+    respiratory_rate = models.PositiveSmallIntegerField(null=True, blank=True)
+    blood_pressure = models.CharField(max_length=20, blank=True)
+    temperature = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
+    weight = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    height = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    body_surface_area = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    bmi = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    general_appearance = models.TextField(blank=True)
+    skin_and_mucosa = models.TextField(blank=True)
+    thorax = models.TextField(blank=True)
+    rib_cage = models.TextField(blank=True)
+    breasts = models.TextField(blank=True)
+    lung_fields = models.TextField(blank=True)
+    cardiac = models.TextField(blank=True)
+    abdomen_pelvis = models.TextField(blank=True)
+    rectal_exam = models.TextField(blank=True)
+    musculoskeletal = models.TextField(blank=True)
+    upper_extremities = models.TextField(blank=True)
+    lower_extremities = models.TextField(blank=True)
+    genitourinary = models.TextField(blank=True)
+    gynecological_exam = models.TextField(blank=True)
+    neurological_exam = models.TextField(blank=True)
+    observations_analysis = models.TextField(blank=True)
+    dental_diagnoses = models.TextField(blank=True)
+    treatment_plan = models.TextField(blank=True)
+    budget = models.TextField(blank=True)
+    treatment_performed = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ("-date", "-created_at")
         indexes = (models.Index(fields=("patient", "-date")),)
+
+    def save(self, *args, **kwargs):
+        if not self.professional_name_snapshot and self.professional_id:
+            self.professional_name_snapshot = (
+                self.professional.get_full_name().strip() or self.professional.email
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_consultation_type_display()} · {self.patient} · {self.date}"

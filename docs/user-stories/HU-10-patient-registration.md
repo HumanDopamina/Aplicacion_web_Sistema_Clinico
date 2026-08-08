@@ -28,12 +28,18 @@
 - La nube **Guardar cambios** y la X **Descartar cambios** aparecen solo cuando el borrador cambia. Guardar actualiza la línea base; descartar restaura el expediente existente o abandona un alta nueva.
 - Si se intenta navegar, recargar o cerrar con cambios pendientes, el sistema advierte antes de perderlos. Un error de API conserva el borrador para reintentar.
 - Los errores de validación, incluso cuando pertenecen al objeto anidado `clinical_record`, muestran el mensaje específico de la API en lugar de ocultarlo tras un aviso genérico.
-- En un paciente persistido, la pestaña **Consultas** carga bajo demanda su historial real y lo ordena de la fecha más reciente a la más antigua. Incluye estados de carga, error y ausencia de registros.
+- En un paciente persistido, la pestaña **Consultas** usa la ruta `/pacientes/{id}/consultas`, carga su historial real y lo ordena de la fecha más reciente a la más antigua. Incluye estados de carga, error y ausencia de registros.
+- Con `consultations.create`, **Nueva consulta** abre `/pacientes/{id}/consultas/nueva`; **Ver detalle** abre `/pacientes/{id}/consultas/{consultationId}` para cualquier usuario con `consultations.view`.
+- La misma ficha de consulta sirve para alta, lectura y edición. Sus campos tienen apariencia textual y la nube/X aparecen únicamente cuando el borrador difiere de la versión persistida.
+- Cada consulta guarda fecha, hora, tipo, resumen, estado, identificación profesional, servicio, anamnesis, interrogatorio por sistemas, examen físico, observaciones, diagnóstico, plan, presupuesto y tratamiento realizado.
+- Fecha, hora, tipo, resumen y estado son obligatorios. En un alta se precargan la fecha y hora locales y el estado **En progreso**; el profesional se asigna desde la sesión y no desde el formulario.
+- Un error conserva el borrador y la navegación con cambios pendientes usa la misma advertencia del expediente. Las consultas completadas continúan editables cuando la cuenta posee `consultations.edit`.
 
 ## Modelo y seguridad
 
 - `Patient` conserva identidad, contacto y datos demográficos permanentes; `ClinicalRecord` mantiene una relación uno-a-uno con la consulta clínica inicial y `Consultation` representa cada entrada posterior del historial.
 - `Consultation.professional` protege la referencia al usuario mediante `PROTECT`, de modo que una consulta no pierda la identidad del profesional asociado.
+- `Consultation.professional_name_snapshot` conserva el nombre presentado al momento del alta aunque la cuenta cambie posteriormente. La migración completa esa copia para registros existentes sin eliminar datos.
 - La creación anidada de ambos modelos se ejecuta dentro de una transacción para evitar expedientes parciales.
 - `code`, `registered_by`, `created_at` y `updated_at` son campos de solo lectura en la API.
 - `GET /api/patients/` y `GET /api/patients/{id}/` requieren `patients.view`.
@@ -50,7 +56,10 @@
 | `POST` | `/api/patients/` | `patients.create` | Registra `Patient` y su objeto anidado `clinical_record`. |
 | `GET` | `/api/patients/{id}/` | `patients.view` | Devuelve la identidad y el expediente clínico completo. |
 | `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza datos permanentes y el objeto `clinical_record`. |
-| `GET` | `/api/patients/{id}/consultations/` | `patients.view` | Lista el historial persistido de consultas, de más reciente a más antiguo. |
+| `GET` | `/api/patients/{id}/consultations/` | `consultations.view` | Lista el historial persistido de consultas, de más reciente a más antiguo. |
+| `POST` | `/api/patients/{id}/consultations/` | `consultations.create` | Registra una consulta y asigna paciente/profesional desde la ruta y sesión. |
+| `GET` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.view` | Devuelve la ficha clínica completa de una consulta del paciente indicado. |
+| `PATCH` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.edit` | Actualiza campos clínicos sin permitir sustituir paciente o profesional. |
 
 ## Evidencia automatizada
 
@@ -60,12 +69,14 @@
 - Dashboard: la acción rápida abre `/pacientes/nuevo` y queda protegida por `patients.create`; el total y los pacientes recientes se cargan desde `GET /api/patients/`.
 - Servicio frontend: listado/búsqueda, creación y detalle con autenticación Bearer.
 - Edición: permiso configurable, rechazo `403`, campos técnicos inmutables, formulario precargado, `PATCH` y actualización visible.
-- Consultas: persistencia, orden descendente, autorización `patients.view`, estado vacío, error de carga y tabla/tarjetas responsivas.
+- Consultas backend: creación completa, metadatos obligatorios, profesional automático, propiedad inmutable, alcance por paciente, permisos separados, edición de completadas y rechazo de eliminación.
+- Consultas frontend: rutas de historial/alta/detalle, acciones por capacidad, valores iniciales, todos los grupos clínicos, `POST`, `PATCH`, descarte, errores, modo lectura, bloqueo de navegación y tabla/tarjetas responsivas.
 
 ## Decisiones de alcance
 
 - La edad se deriva de la fecha de nacimiento y no se almacena como dato duplicado.
 - Las enfermedades se guardan como selecciones estructuradas. Los campos heredados de referencias radiográficas y fotográficas se conservan temporalmente en el backend para no perder datos existentes, pero quedan fuera del formulario hasta su migración al módulo documental.
 - Los apartados excluidos expresamente por la fuente no forman parte del modelo.
-- La creación y el detalle ampliado de consultas, el odontograma y la carga binaria de documentos requieren historias posteriores.
+- Los campos clínicos que todavía existen en `ClinicalRecord` permanecen sin cambios y no se sincronizan automáticamente con las consultas posteriores.
+- El odontograma y la carga binaria de documentos requieren historias posteriores.
 - La separación por clínica deberá incorporarse cuando exista la relación operativa entre usuarios, clínicas y pacientes.

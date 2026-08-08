@@ -13,6 +13,7 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Administración de usuarios por parte del rol administrador.
 - Prevención de cuentas duplicadas mediante validación de correo.
 - Registro y búsqueda de pacientes con apertura automática de su expediente clínico completo.
+- Historial, creación, visualización y edición en línea de consultas clínicas por paciente.
 
 ## Tecnologías
 
@@ -195,6 +196,10 @@ Los enlaces de recuperación:
 | `POST` | `/api/patients/` | `patients.create` | Registra un paciente, genera su código y crea `clinical_record`. |
 | `GET` | `/api/patients/{id}/` | `patients.view` | Abre la identidad y el expediente clínico completo. |
 | `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza datos personales y el expediente clínico anidado. |
+| `GET` | `/api/patients/{id}/consultations/` | `consultations.view` | Lista las consultas del paciente por fecha descendente. |
+| `POST` | `/api/patients/{id}/consultations/` | `consultations.create` | Registra una consulta y asigna el profesional autenticado. |
+| `GET` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.view` | Abre la ficha clínica completa de la consulta. |
+| `PATCH` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.edit` | Actualiza la consulta sin cambiar paciente o profesional. |
 
 ## Pruebas y validación
 
@@ -263,7 +268,9 @@ El expediente presenta datos de consulta, información personal, anamnesis, ante
 
 Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso, los campos de las mismas tarjetas son editables directamente y conservan apariencia de texto hasta recibir foco. La nube **Guardar cambios** y la X **Descartar cambios** aparecen únicamente cuando el borrador difiere de la última versión guardada; la aplicación advierte antes de abandonar cambios pendientes.
 
-La pestaña **Consultas** muestra el historial clínico persistido del paciente en orden descendente por fecha. Cada registro identifica el tipo, profesional, resumen y estado; la lectura usa `patients.view`. El alta y el detalle ampliado de una consulta se incorporarán en un incremento posterior.
+La pestaña **Consultas** muestra el historial clínico persistido del paciente en orden descendente por fecha. Cada registro identifica el tipo, profesional, resumen y estado. **Nueva consulta** abre una ficha completa con el mismo comportamiento de edición directa: fecha/hora actuales y estado **En progreso**, nube para guardar, X para descartar y advertencia al abandonar cambios pendientes.
+
+El administrador gestiona `consultations.view`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
 
 ## Consideraciones para producción
 
@@ -280,4 +287,4 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09 y HU-10 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes permite registrar, buscar, abrir y editar expedientes, además de consultar su historial clínico; las funciones de creación de consultas, odontograma, documentos y citas continúan en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09 y HU-10 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes permite registrar, buscar, abrir y editar expedientes, además de listar, crear, visualizar y editar consultas clínicas. Odontograma, documentos y citas continúan en historias posteriores.
