@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -38,21 +38,27 @@ describe('authenticated routes', () => {
   })
   afterEach(cleanup)
 
-  it.each([
-    ['ADMINISTRADOR', ['Usuarios', 'Pacientes', 'Clínicas', 'Citas']],
-    ['RECEPCIONISTA', ['Pacientes', 'Citas']],
-    ['ODONTOLOGO', ['Pacientes', 'Citas']],
-  ])('shows only the menu allowed for %s', (role, expectedItems) => {
+  it.each(['ADMINISTRADOR', 'RECEPCIONISTA', 'ODONTOLOGO'])(
+    'shows the reference menu for %s',
+    (role) => {
     renderAuthenticated(role)
 
-    for (const item of expectedItems) {
-      expect(screen.getByRole('link', { name: item })).toBeInTheDocument()
+    const navigation = within(screen.getByRole('navigation', { name: 'Navegación principal' }))
+    const links = navigation.getAllByRole('link')
+    expect(links.map((link) => link.textContent.trim())).toEqual([
+      'Dashboard',
+      'Pacientes',
+      'Citas',
+      'Configuración',
+    ])
+    expect(navigation.getByRole('link', { name: 'Configuración' })).toHaveAttribute(
+      'href',
+      '/configuracion',
+    )
+    expect(navigation.queryByRole('link', { name: 'Usuarios' })).not.toBeInTheDocument()
+    expect(navigation.queryByRole('link', { name: 'Clínicas' })).not.toBeInTheDocument()
     }
-    if (role !== 'ADMINISTRADOR') {
-      expect(screen.queryByRole('link', { name: 'Usuarios' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('link', { name: 'Clínicas' })).not.toBeInTheDocument()
-    }
-  })
+  )
 
   it('clears the session and protects history after logout', async () => {
     renderAuthenticated('ADMINISTRADOR', true)
@@ -71,7 +77,7 @@ describe('authenticated routes', () => {
   it('prevents a receptionist from opening an administrator route directly', () => {
     renderAuthenticated('RECEPCIONISTA', false, '/usuarios')
 
-    expect(screen.getByRole('heading', { name: 'Bienvenido, Usuario' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Bienvenido, Dr. Usuario' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Usuarios' })).not.toBeInTheDocument()
   })
 
@@ -82,5 +88,13 @@ describe('authenticated routes', () => {
       'href',
       '/cambiar-contrasena',
     )
+  })
+
+  it('uses the clinic logo in the main navigation and opens on the dashboard', () => {
+    renderAuthenticated('ODONTOLOGO')
+
+    expect(screen.getByRole('img', { name: 'Dental Clinic' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/bienvenida')
+    expect(screen.getByRole('heading', { name: 'Bienvenido, Dr. Usuario' })).toBeInTheDocument()
   })
 })

@@ -15,11 +15,11 @@ function ProtectedLayout({ children, allowedRoles }) {
     return <Navigate to="/bienvenida" replace />
   }
   return (
-    <div className="min-h-screen flex flex-col">
-      <Navbar />
-      <div className="flex flex-1">
-        <Sidebar />
-        <main className="flex-1 p-6">{children}</main>
+    <div className="min-h-screen bg-slate-50 md:flex">
+      <Sidebar />
+      <div className="min-w-0 flex-1">
+        <Navbar />
+        <main className="p-5 sm:p-7 lg:p-10">{children}</main>
       </div>
     </div>
   )
@@ -40,6 +40,7 @@ export default function App() {
     <Route path="/pacientes" element={<ProtectedLayout><ModulePage title="Pacientes" /></ProtectedLayout>} />
     <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Clínicas" /></ProtectedLayout>} />
     <Route path="/citas" element={<ProtectedLayout><ModulePage title="Citas" /></ProtectedLayout>} />
+    <Route path="/configuracion" element={<ProtectedLayout><ModulePage title="Configuración" /></ProtectedLayout>} />
     <Route path="*" element={<Navigate to="/login" replace />} />
   </Routes>
 }
