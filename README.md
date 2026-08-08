@@ -10,6 +10,8 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Recuperación de contraseña mediante enlace temporal.
 - Cambio de contraseña para usuarios autenticados.
 - Invalidación de sesiones anteriores después de cambiar la contraseña.
+- Administración de usuarios por parte del rol administrador.
+- Prevención de cuentas duplicadas mediante validación de correo.
 
 ## Tecnologías
 
@@ -170,11 +172,15 @@ Los enlaces de recuperación:
 | Método | Endpoint | Autenticación | Descripción |
 |---|---|---:|---|
 | `POST` | `/api/auth/login/` | No | Inicia sesión y devuelve los tokens. |
+| `POST` | `/api/auth/token/refresh/` | Refresh token | Renueva automáticamente un access token vencido. |
 | `GET` | `/api/auth/me/` | Sí | Devuelve el usuario autenticado. |
 | `POST` | `/api/auth/logout/` | Sí | Revoca la sesión y el refresh token. |
 | `POST` | `/api/auth/password-reset/` | No | Solicita el enlace de recuperación. |
 | `POST` | `/api/auth/password-reset/confirm/` | No | Confirma una nueva contraseña con uid y token. |
 | `POST` | `/api/auth/password-change/` | Sí | Cambia la contraseña del usuario autenticado. |
+| `GET` | `/api/auth/users/` | Administrador | Lista los usuarios registrados. |
+| `POST` | `/api/auth/users/` | Administrador | Registra un usuario con sus credenciales y rol. |
+| `PATCH` | `/api/auth/users/{id}/` | Administrador | Actualiza datos, rol y estado activo de un usuario. |
 
 ## Pruebas y validación
 
@@ -219,6 +225,17 @@ npm run build
 3. Introduce la contraseña actual y confirma la nueva.
 4. Después del cambio, el sistema cierra la sesión y solicita iniciar nuevamente.
 
+### Administración de usuarios
+
+1. Inicia sesión con una cuenta de rol `ADMINISTRADOR`.
+2. Abre **Configuración** y selecciona **Gestión de Staff**.
+3. Selecciona **Añadir miembro** y completa los datos, el rol y una contraseña segura.
+4. El usuario creado queda disponible inmediatamente para iniciar sesión.
+
+Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos y el estado activo de una cuenta sin mostrar ni modificar su contraseña. HU-08 utiliza el selector de rol del mismo formulario para vincular al perfil los permisos correspondientes.
+
+La aplicación rechaza correos ya registrados, incluso si se escriben usando una combinación diferente de mayúsculas y minúsculas. Los usuarios sin rol administrador no pueden acceder a esta pantalla ni a sus endpoints.
+
 ## Consideraciones para producción
 
 Antes de desplegar el sistema:
@@ -234,4 +251,4 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03 y HU-04 están implementadas y cuentan con pruebas automatizadas. Los módulos de pacientes, clínicas y citas conservan su estructura inicial para desarrollarse en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06 y HU-08 están implementadas y cuentan con pruebas automatizadas. HU-05 registra usuarios, HU-06 modifica su información y HU-08 asigna sus roles y permisos. Los módulos de pacientes, clínicas y citas conservan su estructura inicial para desarrollarse en historias posteriores.

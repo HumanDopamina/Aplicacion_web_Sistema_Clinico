@@ -8,7 +8,7 @@ This repository contains a split Django/React clinical application under `src/`.
 
 Run backend commands from `src/backend`:
 
-- `python -m venv venv` and `pip install -r requirements.txt` create the Python environment and install dependencies.
+- `python -m venv .venv` and `pip install -r requirements.txt` create the Python environment and install dependencies.
 - `python manage.py migrate` applies database migrations.
 - `python manage.py runserver` starts the Django API locally.
 - `python manage.py test` runs all Django tests.

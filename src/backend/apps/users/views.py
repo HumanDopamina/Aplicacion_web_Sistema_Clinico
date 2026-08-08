@@ -6,7 +6,8 @@ from django.core.mail import send_mail
 from django.db.models import F
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import generics
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -17,7 +18,10 @@ from .serializers import (
     LogoutSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    UserAdminSerializer,
+    UserAdminUpdateSerializer,
 )
+from .models import User
 
 
 PASSWORD_RESET_MESSAGE = (
@@ -125,3 +129,23 @@ class ChangePasswordView(APIView):
             {"detail": "Tu contraseña fue actualizada correctamente."},
             status=status.HTTP_200_OK,
         )
+
+
+class IsAdministrator(BasePermission):
+    def has_permission(self, request, view):
+        return (
+            request.user.is_authenticated
+            and request.user.role == User.Role.ADMINISTRADOR
+        )
+
+
+class UserCollectionView(generics.ListCreateAPIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+    serializer_class = UserAdminSerializer
+    queryset = User.objects.order_by("first_name", "email")
+
+
+class UserDetailView(generics.UpdateAPIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+    serializer_class = UserAdminUpdateSerializer
+    queryset = User.objects.all()

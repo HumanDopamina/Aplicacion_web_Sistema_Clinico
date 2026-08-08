@@ -81,6 +81,13 @@ describe('authenticated routes', () => {
     expect(screen.queryByRole('heading', { name: 'Usuarios' })).not.toBeInTheDocument()
   })
 
+  it('prevents a receptionist from opening staff configuration directly', () => {
+    renderAuthenticated('RECEPCIONISTA', false, '/configuracion')
+
+    expect(screen.getByRole('heading', { name: 'Bienvenido, Dr. Usuario' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Configuración' })).not.toBeInTheDocument()
+  })
+
   it('offers password change navigation to every authenticated role', () => {
     renderAuthenticated('ODONTOLOGO')
 

@@ -5,6 +5,7 @@ import WelcomePage from './pages/Auth/WelcomePage'
 import PasswordResetRequestPage from './pages/Auth/PasswordResetRequestPage'
 import PasswordResetConfirmPage from './pages/Auth/PasswordResetConfirmPage'
 import ChangePasswordPage from './pages/Auth/ChangePasswordPage'
+import SettingsPage from './pages/Settings/SettingsPage'
 import Navbar from './components/Navbar'
 import Sidebar from './components/Sidebar'
 
@@ -40,7 +41,7 @@ export default function App() {
     <Route path="/pacientes" element={<ProtectedLayout><ModulePage title="Pacientes" /></ProtectedLayout>} />
     <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Clínicas" /></ProtectedLayout>} />
     <Route path="/citas" element={<ProtectedLayout><ModulePage title="Citas" /></ProtectedLayout>} />
-    <Route path="/configuracion" element={<ProtectedLayout><ModulePage title="Configuración" /></ProtectedLayout>} />
+    <Route path="/configuracion" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><SettingsPage /></ProtectedLayout>} />
     <Route path="*" element={<Navigate to="/login" replace />} />
   </Routes>
 }

@@ -96,6 +96,28 @@ class LoginApiTests(APITestCase):
         profile_response = self.client.get(reverse("users:current-user"))
         self.assertEqual(profile_response.status_code, 401)
 
+    def test_refresh_token_issues_a_new_access_token_for_protected_requests(self):
+        login_response = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "ContraseñaSegura123!"},
+            format="json",
+        )
+
+        refresh_response = self.client.post(
+            reverse("users:token-refresh"),
+            {"refresh": login_response.data["refresh"]},
+            format="json",
+        )
+
+        self.assertEqual(refresh_response.status_code, 200)
+        self.client.credentials(
+            HTTP_AUTHORIZATION=f"Bearer {refresh_response.data['access']}"
+        )
+        self.assertEqual(
+            self.client.get(reverse("users:current-user")).status_code,
+            200,
+        )
+
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class PasswordResetApiTests(APITestCase):
@@ -295,3 +317,155 @@ class ChangePasswordApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("new_password", response.data)
         self.assertGreaterEqual(len(response.data["new_password"]), 2)
+
+
+class UserRegistrationApiTests(APITestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="admin-users@dentalclinic.com",
+            password="ContraseñaAdmin123!",
+            role=User.Role.ADMINISTRADOR,
+            first_name="Admin",
+        )
+        self.url = reverse("users:user-list")
+
+    def payload(self, **overrides):
+        data = {
+            "email": "nuevo@dentalclinic.com",
+            "first_name": "Lucía",
+            "last_name": "Méndez",
+            "role": User.Role.ODONTOLOGO,
+            "password": "ContraseñaSegura123!",
+            "confirm_password": "ContraseñaSegura123!",
+        }
+        data.update(overrides)
+        return data
+
+    def test_administrator_creates_a_login_ready_user_without_exposing_password(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(self.url, self.payload(), format="json")
+
+        self.assertEqual(response.status_code, 201)
+        created = User.objects.get(email="nuevo@dentalclinic.com")
+        self.assertTrue(created.check_password("ContraseñaSegura123!"))
+        self.assertNotIn("password", response.data)
+        self.assertNotIn("confirm_password", response.data)
+        login = self.client.post(
+            reverse("users:login"),
+            {"email": created.email, "password": "ContraseñaSegura123!"},
+            format="json",
+        )
+        self.assertEqual(login.status_code, 200)
+
+    def test_existing_email_is_rejected_case_insensitively(self):
+        User.objects.create_user(
+            email="existente@dentalclinic.com",
+            password="OtraContraseña123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(
+            self.url,
+            self.payload(email="EXISTENTE@dentalclinic.com"),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
+        self.assertEqual(User.objects.filter(email__iexact="existente@dentalclinic.com").count(), 1)
+
+    def test_weak_password_is_rejected(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(
+            self.url,
+            self.payload(password="123", confirm_password="123"),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("password", response.data)
+
+    def test_non_administrator_cannot_create_or_list_users(self):
+        receptionist = User.objects.create_user(
+            email="recepcion-users@dentalclinic.com",
+            password="ContraseñaRecepcion123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.client.force_authenticate(receptionist)
+
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+        self.assertEqual(self.client.post(self.url, self.payload(), format="json").status_code, 403)
+
+    def test_hu06_and_hu08_update_information_and_role_without_changing_password(self):
+        member = User.objects.create_user(
+            email="editar@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+            {
+                "email": "EDITADO@dentalclinic.com",
+                "first_name": "Elena",
+                "last_name": "Vargas",
+                "role": User.Role.ODONTOLOGO,
+                "is_active": False,
+                "is_superuser": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        member.refresh_from_db()
+        self.assertEqual(member.email, "editado@dentalclinic.com")
+        self.assertEqual(member.first_name, "Elena")
+        self.assertEqual(member.role, User.Role.ODONTOLOGO)
+        self.assertFalse(member.is_active)
+        self.assertFalse(member.is_superuser)
+        self.assertTrue(member.check_password("ContraseñaOriginal123!"))
+        self.assertNotIn("password", response.data)
+
+    def test_update_rejects_an_email_used_by_another_user(self):
+        member = User.objects.create_user(
+            email="editar@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+        )
+        User.objects.create_user(
+            email="ocupado@dentalclinic.com",
+            password="ContraseñaOcupada123!",
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+            {"email": "OCUPADO@dentalclinic.com"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.data)
+        member.refresh_from_db()
+        self.assertEqual(member.email, "editar@dentalclinic.com")
+
+    def test_non_administrator_cannot_update_users(self):
+        receptionist = User.objects.create_user(
+            email="recepcion-edit@dentalclinic.com",
+            password="ContraseñaRecepcion123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.client.force_authenticate(receptionist)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": self.admin.pk}),
+            {"first_name": "Alterado"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.admin.refresh_from_db()
+        self.assertEqual(self.admin.first_name, "Admin")
