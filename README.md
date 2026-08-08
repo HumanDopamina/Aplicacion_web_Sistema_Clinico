@@ -254,7 +254,7 @@ La aplicación rechaza correos ya registrados, incluso si se escriben usando una
 ### Registro de pacientes
 
 1. Inicia sesión con una cuenta que tenga `patients.view` y `patients.create`.
-2. Abre **Pacientes** y selecciona **Nuevo paciente**.
+2. Selecciona **Nuevo paciente** desde el dashboard o desde **Pacientes**; ambas acciones abren el mismo formulario.
 3. Completa los datos personales obligatorios y guarda.
 4. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
 
