@@ -56,6 +56,35 @@ describe('SettingsPage staff management', () => {
     expect(screen.getByRole('button', { name: 'Añadir miembro' })).toBeInTheDocument()
   })
 
+  it('[HU-09] shows every registered user with role and active status', async () => {
+    userService.listUsers.mockResolvedValue([
+      {
+        id: 2,
+        email: 'ana@dentalclinic.com',
+        first_name: 'Ana',
+        last_name: 'Pérez',
+        role: 'ODONTOLOGO',
+        is_active: true,
+      },
+      {
+        id: 3,
+        email: 'bruno@dentalclinic.com',
+        first_name: 'Bruno',
+        last_name: 'López',
+        role: 'RECEPCIONISTA',
+        is_active: false,
+      },
+    ])
+    renderPage()
+
+    expect(await screen.findByText('Ana Pérez')).toBeInTheDocument()
+    expect(screen.getByText('Bruno López')).toBeInTheDocument()
+    expect(screen.getByText('Odontólogo')).toBeInTheDocument()
+    expect(screen.getByText('Recepcionista')).toBeInTheDocument()
+    expect(screen.getByText('Activo')).toBeInTheDocument()
+    expect(screen.getByText('Inactivo')).toBeInTheDocument()
+  })
+
   it('registers a member and adds it to the staff list', async () => {
     renderPage()
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir miembro' }))
@@ -100,6 +129,14 @@ describe('SettingsPage staff management', () => {
       role: 'RECEPCIONISTA',
       is_active: true,
     }])
+    userService.updateUser.mockResolvedValue({
+      id: 7,
+      email: 'elena.editada@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Vargas',
+      role: 'ODONTOLOGO',
+      is_active: true,
+    })
     renderPage()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
@@ -108,16 +145,41 @@ describe('SettingsPage staff management', () => {
     fireEvent.change(screen.getByLabelText('Apellidos'), { target: { value: 'Vargas' } })
     fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'elena.editada@dentalclinic.com' } })
     fireEvent.change(screen.getByLabelText('Rol'), { target: { value: 'ODONTOLOGO' } })
-    fireEvent.click(screen.getByLabelText('Usuario activo'))
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
 
     expect(await screen.findByText('elena.editada@dentalclinic.com')).toBeInTheDocument()
-    expect(screen.getByText('Inactivo')).toBeInTheDocument()
+    expect(screen.getByText('Activo')).toBeInTheDocument()
     expect(userService.updateUser).toHaveBeenCalledWith('access-token', 7, {
       email: 'elena.editada@dentalclinic.com',
       first_name: 'Elena',
       last_name: 'Vargas',
       role: 'ODONTOLOGO',
+      is_active: true,
+    })
+  })
+
+  it('[HU-07] deactivates a member and updates the visible status', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    fireEvent.click(screen.getByLabelText('Usuario activo'))
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByText('Inactivo')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Editar miembro' })).not.toBeInTheDocument()
+    expect(userService.updateUser).toHaveBeenCalledWith('access-token', 7, {
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      role: 'RECEPCIONISTA',
       is_active: false,
     })
   })

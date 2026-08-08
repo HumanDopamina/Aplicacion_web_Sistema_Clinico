@@ -341,6 +341,42 @@ class UserRegistrationApiTests(APITestCase):
         data.update(overrides)
         return data
 
+    def test_hu09_administrator_lists_every_user_with_role_and_status(self):
+        User.objects.create_user(
+            email="activo@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Ana",
+            role=User.Role.ODONTOLOGO,
+        )
+        User.objects.create_user(
+            email="inactivo@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Bruno",
+            role=User.Role.RECEPCIONISTA,
+            is_active=False,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        for user in response.data:
+            self.assertIn("role", user)
+            self.assertIn("is_active", user)
+        users_by_email = {user["email"]: user for user in response.data}
+        self.assertEqual(
+            users_by_email["activo@dentalclinic.com"]["role"],
+            User.Role.ODONTOLOGO,
+        )
+        self.assertTrue(users_by_email["activo@dentalclinic.com"]["is_active"])
+        self.assertEqual(
+            users_by_email["inactivo@dentalclinic.com"]["role"],
+            User.Role.RECEPCIONISTA,
+        )
+        self.assertFalse(users_by_email["inactivo@dentalclinic.com"]["is_active"])
+        self.assertIn("admin-users@dentalclinic.com", users_by_email)
+
     def test_administrator_creates_a_login_ready_user_without_exposing_password(self):
         self.client.force_authenticate(self.admin)
 
@@ -414,7 +450,6 @@ class UserRegistrationApiTests(APITestCase):
                 "first_name": "Elena",
                 "last_name": "Vargas",
                 "role": User.Role.ODONTOLOGO,
-                "is_active": False,
                 "is_superuser": True,
             },
             format="json",
@@ -425,10 +460,69 @@ class UserRegistrationApiTests(APITestCase):
         self.assertEqual(member.email, "editado@dentalclinic.com")
         self.assertEqual(member.first_name, "Elena")
         self.assertEqual(member.role, User.Role.ODONTOLOGO)
-        self.assertFalse(member.is_active)
+        self.assertTrue(member.is_active)
         self.assertFalse(member.is_superuser)
         self.assertTrue(member.check_password("ContraseñaOriginal123!"))
         self.assertNotIn("password", response.data)
+
+    def test_hu07_deactivation_preserves_user_and_blocks_login(self):
+        password = "ContraseñaOriginal123!"
+        member = User.objects.create_user(
+            email="desactivar@dentalclinic.com",
+            password=password,
+            first_name="Elena",
+            last_name="Vargas",
+            role=User.Role.RECEPCIONISTA,
+        )
+        original_id = member.pk
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": original_id}),
+            {"is_active": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        member.refresh_from_db()
+        self.assertFalse(member.is_active)
+        self.assertTrue(
+            User.objects.filter(
+                pk=original_id,
+                email="desactivar@dentalclinic.com",
+                first_name="Elena",
+                last_name="Vargas",
+                role=User.Role.RECEPCIONISTA,
+            ).exists()
+        )
+
+        self.client.force_authenticate(user=None)
+        login = self.client.post(
+            reverse("users:login"),
+            {"email": member.email, "password": password},
+            format="json",
+        )
+
+        self.assertEqual(login.status_code, 400)
+        self.assertEqual(
+            login.data["detail"][0],
+            "Correo electrónico o contraseña incorrectos.",
+        )
+
+    def test_hu07_user_detail_does_not_allow_deletion(self):
+        member = User.objects.create_user(
+            email="conservar@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+        )
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(User.objects.filter(pk=member.pk).exists())
 
     def test_update_rejects_an_email_used_by_another_user(self):
         member = User.objects.create_user(

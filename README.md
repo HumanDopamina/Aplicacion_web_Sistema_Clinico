@@ -229,10 +229,11 @@ npm run build
 
 1. Inicia sesión con una cuenta de rol `ADMINISTRADOR`.
 2. Abre **Configuración** y selecciona **Gestión de Staff**.
-3. Selecciona **Añadir miembro** y completa los datos, el rol y una contraseña segura.
-4. El usuario creado queda disponible inmediatamente para iniciar sesión.
+3. Consulta la lista completa de usuarios con su rol y estado activo o inactivo.
+4. Selecciona **Añadir miembro** y completa los datos, el rol y una contraseña segura.
+5. El usuario creado queda disponible inmediatamente para iniciar sesión.
 
-Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos y el estado activo de una cuenta sin mostrar ni modificar su contraseña. HU-08 utiliza el selector de rol del mismo formulario para vincular al perfil los permisos correspondientes.
+Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos sin mostrar ni modificar la contraseña. HU-07 permite desactivar la cuenta sin eliminarla, HU-08 asigna el rol y sus permisos, y HU-09 presenta todos los usuarios con su rol y estado.
 
 La aplicación rechaza correos ya registrados, incluso si se escriben usando una combinación diferente de mayúsculas y minúsculas. Los usuarios sin rol administrador no pueden acceder a esta pantalla ni a sus endpoints.
 
@@ -251,4 +252,4 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06 y HU-08 están implementadas y cuentan con pruebas automatizadas. HU-05 registra usuarios, HU-06 modifica su información y HU-08 asigna sus roles y permisos. Los módulos de pacientes, clínicas y citas conservan su estructura inicial para desarrollarse en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08 y HU-09 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. Los módulos de pacientes, clínicas y citas conservan su estructura inicial para desarrollarse en historias posteriores.
