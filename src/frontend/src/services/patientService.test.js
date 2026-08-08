@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPatient, getPatient, listPatients } from './patientService'
+import * as patientService from './patientService'
 import { apiRequest } from './api'
 
 vi.mock('./api', () => ({ apiRequest: vi.fn() }))
@@ -26,6 +27,16 @@ describe('patientService', () => {
     getPatient('token', 7)
     expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/', {
       headers: { Authorization: 'Bearer token' },
+    })
+  })
+
+  it('updates only the submitted patient fields with authentication', () => {
+    const changes = { address: 'Residencial Las Colinas' }
+
+    patientService.updatePatient('token', 7, changes)
+
+    expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/', {
+      method: 'PATCH', body: JSON.stringify(changes), headers: { Authorization: 'Bearer token' },
     })
   })
 })

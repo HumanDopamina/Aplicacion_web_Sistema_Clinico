@@ -41,6 +41,7 @@ class LoginApiTests(APITestCase):
             [
                 "patients.view",
                 "patients.create",
+                "patients.edit",
                 "appointments.view",
                 "appointments.create",
             ],
@@ -600,6 +601,7 @@ class RolePermissionPresetApiTests(APITestCase):
             [
                 "patients.view",
                 "patients.create",
+                "patients.edit",
                 "appointments.view",
                 "appointments.create",
             ],

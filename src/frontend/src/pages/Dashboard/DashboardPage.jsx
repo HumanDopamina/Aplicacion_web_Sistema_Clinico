@@ -64,7 +64,7 @@ export default function DashboardPage({ user, accessToken }) {
           </div>
         </article>
       </section>
-      {patientFormOpen ? <PatientFormModal accessToken={accessToken} onClose={() => setPatientFormOpen(false)} onCreated={(patient) => { setPatientFormOpen(false); navigate(`/pacientes/${patient.id}`) }} /> : null}
+      {patientFormOpen ? <PatientFormModal accessToken={accessToken} onClose={() => setPatientFormOpen(false)} onSaved={(patient) => { setPatientFormOpen(false); navigate(`/pacientes/${patient.id}`) }} /> : null}
     </div>
   )
 }

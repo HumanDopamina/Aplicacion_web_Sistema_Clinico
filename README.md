@@ -194,6 +194,7 @@ Los enlaces de recuperación:
 | `GET` | `/api/patients/` | `patients.view` | Lista pacientes y permite buscar con `?search=`. |
 | `POST` | `/api/patients/` | `patients.create` | Registra un paciente y genera su código clínico. |
 | `GET` | `/api/patients/{id}/` | `patients.view` | Abre el expediente base del paciente. |
+| `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza información personal, contacto y estado del expediente base. |
 
 ## Pruebas y validación
 
@@ -259,6 +260,8 @@ La aplicación rechaza correos ya registrados, incluso si se escriben usando una
 4. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
 
 El expediente inicial presenta la información personal y el contacto de emergencia. Las secciones clínicas aún no implementadas se muestran vacías de forma explícita, sin inventar información médica.
+
+Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso aparecen los botones **Editar** en información personal y contacto de emergencia; ambos reutilizan el formulario y actualizan la vista después de guardar.
 
 ## Consideraciones para producción
 

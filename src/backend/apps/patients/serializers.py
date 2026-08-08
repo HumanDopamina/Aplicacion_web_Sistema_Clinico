@@ -44,7 +44,10 @@ class PatientSerializer(serializers.ModelSerializer):
 
     def validate_national_id(self, value):
         normalized = value.strip().upper()
-        if Patient.objects.filter(national_id__iexact=normalized).exists():
+        matching_patients = Patient.objects.filter(national_id__iexact=normalized)
+        if self.instance:
+            matching_patients = matching_patients.exclude(pk=self.instance.pk)
+        if matching_patients.exists():
             raise serializers.ValidationError("Ya existe un paciente con esta cédula.")
         return normalized
 

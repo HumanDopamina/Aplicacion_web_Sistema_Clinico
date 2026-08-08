@@ -25,6 +25,7 @@ Como administrador, quiero visualizar la lista de usuarios registrados para admi
 - Interfaz: **Configuración → Gestión de Staff**.
 - `GET /api/auth/role-permissions/`: devuelve `available_permissions` y los presets editables.
 - `PATCH /api/auth/role-permissions/{role}/`: acepta `{ "permissions": ["patients.view"] }`.
+- El catálogo incluye `patients.edit` (**Editar pacientes**) para otorgarlo explícitamente a recepcionistas u odontólogos.
 - Login y `GET /api/auth/me/`: incluyen `permissions` efectivos.
 - Interfaz: **Configuración → Permisos por rol**.
 

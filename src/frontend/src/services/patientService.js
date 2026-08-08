@@ -16,3 +16,9 @@ export const createPatient = (access, patient) => apiRequest('/api/patients/', {
 export const getPatient = (access, id) => apiRequest(`/api/patients/${id}/`, {
   headers: authorization(access),
 })
+
+export const updatePatient = (access, id, changes) => apiRequest(`/api/patients/${id}/`, {
+  method: 'PATCH',
+  body: JSON.stringify(changes),
+  headers: authorization(access),
+})

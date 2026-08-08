@@ -137,3 +137,47 @@ class PatientApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["full_name"], "Juan Pérez")
+
+    def test_hu10_role_with_edit_permission_updates_patient_and_preserves_audit_fields(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(self.list_url, self.payload(), format="json")
+        patient_url = f"{self.list_url}{created.data['id']}/"
+        preset = RolePermissionPreset.objects.get(role=User.Role.RECEPCIONISTA)
+        preset.permissions = ["patients.view", "patients.edit"]
+        preset.save(update_fields=["permissions"])
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.patch(
+            patient_url,
+            {
+                "address": "Residencial Las Colinas",
+                "emergency_phone": "+505 7777 3333",
+                "national_id": "001-160498-0001a",
+                "code": "PAC-99999",
+                "registered_by": self.receptionist.pk,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["address"], "Residencial Las Colinas")
+        self.assertEqual(response.data["emergency_phone"], "+505 7777 3333")
+        self.assertEqual(response.data["national_id"], "001-160498-0001A")
+        self.assertEqual(response.data["code"], "PAC-00001")
+        self.assertEqual(response.data["registered_by"], self.admin.pk)
+
+    def test_hu10_user_without_edit_permission_cannot_modify_patient(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(self.list_url, self.payload(), format="json")
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.patch(
+            f"{self.list_url}{created.data['id']}/",
+            {"address": "Cambio no autorizado"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.client.force_authenticate(self.admin)
+        detail = self.client.get(f"{self.list_url}{created.data['id']}/")
+        self.assertEqual(detail.data["address"], "Colonia Roma Norte")

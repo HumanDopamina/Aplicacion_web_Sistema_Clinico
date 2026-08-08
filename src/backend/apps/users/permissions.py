@@ -4,6 +4,7 @@ from rest_framework.permissions import BasePermission
 PERMISSION_CATALOG = (
     {"code": "patients.view", "label": "Ver pacientes", "group": "Pacientes"},
     {"code": "patients.create", "label": "Registrar pacientes", "group": "Pacientes"},
+    {"code": "patients.edit", "label": "Editar pacientes", "group": "Pacientes"},
     {"code": "appointments.view", "label": "Ver citas", "group": "Citas"},
     {"code": "appointments.create", "label": "Crear citas", "group": "Citas"},
 )

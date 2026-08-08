@@ -53,11 +53,12 @@ describe('SettingsPage staff management', () => {
       available_permissions: [
         { code: 'patients.view', label: 'Ver pacientes', group: 'Pacientes' },
         { code: 'patients.create', label: 'Registrar pacientes', group: 'Pacientes' },
+        { code: 'patients.edit', label: 'Editar pacientes', group: 'Pacientes' },
         { code: 'appointments.view', label: 'Ver citas', group: 'Citas' },
         { code: 'appointments.create', label: 'Crear citas', group: 'Citas' },
       ],
       presets: [
-        { role: 'RECEPCIONISTA', permissions: ['patients.view', 'patients.create', 'appointments.view', 'appointments.create'] },
+        { role: 'RECEPCIONISTA', permissions: ['patients.view', 'patients.create', 'patients.edit', 'appointments.view', 'appointments.create'] },
         { role: 'ODONTOLOGO', permissions: ['patients.view', 'appointments.view'] },
       ],
     })
@@ -113,8 +114,10 @@ describe('SettingsPage staff management', () => {
     fireEvent.click(screen.getByRole('button', { name: /Permisos por rol/ }))
     expect(await screen.findByRole('heading', { name: 'Permisos por rol' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Recepcionista' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByLabelText('Editar pacientes')).toBeChecked()
     fireEvent.click(screen.getByRole('button', { name: 'Odontólogo' }))
     expect(screen.getByLabelText('Registrar pacientes')).not.toBeChecked()
+    expect(screen.getByLabelText('Editar pacientes')).not.toBeChecked()
 
     fireEvent.click(screen.getByLabelText('Registrar pacientes'))
     fireEvent.click(screen.getByRole('button', { name: 'Guardar permisos' }))

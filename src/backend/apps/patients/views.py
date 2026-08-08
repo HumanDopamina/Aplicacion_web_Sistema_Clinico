@@ -30,8 +30,12 @@ class PatientListCreateView(generics.ListCreateAPIView):
         serializer.save(registered_by=self.request.user)
 
 
-class PatientDetailView(generics.RetrieveAPIView):
+class PatientDetailView(generics.RetrieveUpdateAPIView):
     queryset = Patient.objects.select_related("registered_by").all()
     serializer_class = PatientSerializer
     permission_classes = (IsAuthenticated, HasCapability)
-    required_permissions = {"GET": "patients.view"}
+    required_permissions = {
+        "GET": "patients.view",
+        "PATCH": "patients.edit",
+    }
+    http_method_names = ("get", "patch", "head", "options")
