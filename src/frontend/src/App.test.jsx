@@ -7,10 +7,27 @@ import * as authService from './services/authService'
 
 vi.mock('./services/authService')
 
+const rolePermissions = {
+  ADMINISTRADOR: ['patients.view', 'patients.create', 'appointments.view', 'appointments.create'],
+  RECEPCIONISTA: ['patients.view', 'patients.create', 'appointments.view', 'appointments.create'],
+  ODONTOLOGO: ['patients.view', 'appointments.view'],
+}
+
 const session = (role) => ({
   access: 'access-token',
   refresh: 'refresh-token',
-  user: { email: `${role.toLowerCase()}@test.com`, first_name: 'Usuario', role },
+  user: {
+    email: `${role.toLowerCase()}@test.com`,
+    first_name: 'Usuario',
+    role,
+    permissions: rolePermissions[role],
+  },
+})
+
+const jsonResponse = (data, status = 200) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: () => Promise.resolve(data),
 })
 
 function BackControl() {
@@ -36,7 +53,10 @@ describe('authenticated routes', () => {
     sessionStorage.clear()
     authService.logout.mockResolvedValue(undefined)
   })
-  afterEach(cleanup)
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
 
   it.each(['ADMINISTRADOR', 'RECEPCIONISTA', 'ODONTOLOGO'])(
     'shows the reference menu for %s',
@@ -103,5 +123,56 @@ describe('authenticated routes', () => {
     expect(screen.getByRole('img', { name: 'Dental Clinic' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', '/bienvenida')
     expect(screen.getByRole('heading', { name: 'Bienvenido, Dr. Usuario' })).toBeInTheDocument()
+  })
+
+  it('[HU-10] registers a patient and opens the new clinical record', async () => {
+    const patient = {
+      id: 1,
+      code: 'PAC-00001',
+      first_name: 'María Fernanda',
+      last_name: 'García',
+      second_last_name: 'López',
+      full_name: 'María Fernanda García López',
+      birth_place: 'Managua',
+      address: 'Colonia Roma Norte',
+      national_id: '001-160498-0001A',
+      phone: '+505 8888 1111',
+      email: 'maria@example.com',
+      emergency_contact_name: 'Carlos García',
+      emergency_relationship: 'Hermano',
+      emergency_phone: '+505 8888 2222',
+      gender: 'FEMENINO',
+      date_of_birth: '1998-04-16',
+      is_active: true,
+      created_at: '2026-08-08T12:00:00Z',
+      registered_by: 2,
+    }
+    const fetchMock = vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/') && options.method === 'POST') {
+        return Promise.resolve(jsonResponse(patient, 201))
+      }
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patient))
+      if (url.endsWith('/api/patients/')) return Promise.resolve(jsonResponse([]))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo paciente' }))
+    fireEvent.change(screen.getByLabelText('Nombres'), { target: { value: 'María Fernanda' } })
+    fireEvent.change(screen.getByLabelText('Primer apellido'), { target: { value: 'García' } })
+    fireEvent.change(screen.getByLabelText('Segundo apellido'), { target: { value: 'López' } })
+    fireEvent.change(screen.getByLabelText('Lugar de nacimiento'), { target: { value: 'Managua' } })
+    fireEvent.change(screen.getByLabelText('Cédula'), { target: { value: '001-160498-0001A' } })
+    fireEvent.change(screen.getByLabelText('Género'), { target: { value: 'FEMENINO' } })
+    fireEvent.change(screen.getByLabelText('Fecha de nacimiento'), { target: { value: '1998-04-16' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Añadir paciente' }))
+
+    expect(await screen.findByRole('heading', { name: 'María Fernanda García López' })).toBeInTheDocument()
+    expect(screen.getByText('PAC-00001')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/patients/',
+      expect.objectContaining({ method: 'POST' }),
+    )
   })
 })

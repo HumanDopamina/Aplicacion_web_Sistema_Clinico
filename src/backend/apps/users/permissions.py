@@ -1,3 +1,6 @@
+from rest_framework.permissions import BasePermission
+
+
 PERMISSION_CATALOG = (
     {"code": "patients.view", "label": "Ver pacientes", "group": "Pacientes"},
     {"code": "patients.create", "label": "Registrar pacientes", "group": "Pacientes"},
@@ -35,3 +38,16 @@ def get_effective_permissions(user):
 
 def user_has_permission(user, permission_code):
     return permission_code in get_effective_permissions(user)
+
+
+class HasCapability(BasePermission):
+    """Authorize each HTTP method with the capability declared by the view."""
+
+    def has_permission(self, request, view):
+        permission_code = getattr(view, "required_permissions", {}).get(request.method)
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and permission_code
+            and user_has_permission(request.user, permission_code)
+        )
