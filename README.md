@@ -94,6 +94,8 @@ El modelo de usuario utiliza el correo electrónico como identificador de acceso
 - `RECEPCIONISTA`
 - `ODONTOLOGO`
 
+El administrador configura presets globales de permisos para `RECEPCIONISTA` y `ODONTOLOGO` desde **Configuración → Permisos por rol**. El rol `ADMINISTRADOR` conserva acceso total y no es editable.
+
 ### Ejecutar el backend
 
 ```powershell
@@ -181,6 +183,8 @@ Los enlaces de recuperación:
 | `GET` | `/api/auth/users/` | Administrador | Lista los usuarios registrados. |
 | `POST` | `/api/auth/users/` | Administrador | Registra un usuario con sus credenciales y rol. |
 | `PATCH` | `/api/auth/users/{id}/` | Administrador | Actualiza datos, rol y estado activo de un usuario. |
+| `GET` | `/api/auth/role-permissions/` | Administrador | Lista el catálogo y los presets editables por rol. |
+| `PATCH` | `/api/auth/role-permissions/{role}/` | Administrador | Reemplaza el preset global de un rol editable. |
 
 ## Pruebas y validación
 
@@ -232,6 +236,7 @@ npm run build
 3. Consulta la lista completa de usuarios con su rol y estado activo o inactivo.
 4. Selecciona **Añadir miembro** y completa los datos, el rol y una contraseña segura.
 5. El usuario creado queda disponible inmediatamente para iniciar sesión.
+6. Abre **Permisos por rol** para definir los accesos globales de recepcionistas y odontólogos.
 
 Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos sin mostrar ni modificar la contraseña. HU-07 permite desactivar la cuenta sin eliminarla, HU-08 asigna el rol y sus permisos, y HU-09 presenta todos los usuarios con su rol y estado.
 

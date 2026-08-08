@@ -36,6 +36,15 @@ class LoginApiTests(APITestCase):
         self.assertIn("access", response.data)
         self.assertIn("refresh", response.data)
         self.assertEqual(response.data["user"]["role"], User.Role.ADMINISTRADOR)
+        self.assertEqual(
+            response.data["user"]["permissions"],
+            [
+                "patients.view",
+                "patients.create",
+                "appointments.view",
+                "appointments.create",
+            ],
+        )
         self.assertNotIn("password", response.data["user"])
 
     def test_invalid_credentials_return_generic_error(self):
@@ -563,3 +572,117 @@ class UserRegistrationApiTests(APITestCase):
         self.assertEqual(response.status_code, 403)
         self.admin.refresh_from_db()
         self.assertEqual(self.admin.first_name, "Admin")
+
+
+class RolePermissionPresetApiTests(APITestCase):
+    list_url = "/api/auth/role-permissions/"
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="admin-permissions@dentalclinic.com",
+            password="ContraseñaAdmin123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.receptionist = User.objects.create_user(
+            email="recepcion-permissions@dentalclinic.com",
+            password="ContraseñaRecepcion123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+
+    def test_hu09_administrator_lists_editable_role_presets_and_catalog(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["code"] for item in response.data["available_permissions"]],
+            [
+                "patients.view",
+                "patients.create",
+                "appointments.view",
+                "appointments.create",
+            ],
+        )
+        self.assertEqual(
+            {preset["role"] for preset in response.data["presets"]},
+            {User.Role.RECEPCIONISTA, User.Role.ODONTOLOGO},
+        )
+
+    def test_hu09_administrator_replaces_a_role_permission_preset(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.ODONTOLOGO}/",
+            {"permissions": ["patients.view", "patients.create"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "role": User.Role.ODONTOLOGO,
+                "permissions": ["patients.view", "patients.create"],
+            },
+        )
+
+    def test_hu09_effective_permissions_follow_the_global_role_preset(self):
+        self.client.force_authenticate(self.admin)
+        self.client.patch(
+            f"{self.list_url}{User.Role.RECEPCIONISTA}/",
+            {"permissions": ["patients.view", "patients.create"]},
+            format="json",
+        )
+        self.client.force_authenticate(self.receptionist)
+
+        profile = self.client.get(reverse("users:current-user"))
+
+        self.assertEqual(profile.status_code, 200)
+        self.assertIn("permissions", profile.data)
+        self.assertEqual(
+            profile.data["permissions"],
+            ["patients.view", "patients.create"],
+        )
+
+    def test_hu09_rejects_unknown_permission_codes_without_changing_preset(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.RECEPCIONISTA}/",
+            {"permissions": ["users.become_admin"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        current = self.client.get(self.list_url)
+        receptionist = next(
+            preset
+            for preset in current.data["presets"]
+            if preset["role"] == User.Role.RECEPCIONISTA
+        )
+        self.assertNotIn("users.become_admin", receptionist["permissions"])
+
+    def test_hu09_non_administrator_cannot_read_or_change_role_presets(self):
+        self.client.force_authenticate(self.receptionist)
+
+        self.assertEqual(self.client.get(self.list_url).status_code, 403)
+        self.assertEqual(
+            self.client.patch(
+                f"{self.list_url}{User.Role.ODONTOLOGO}/",
+                {"permissions": ["patients.view"]},
+                format="json",
+            ).status_code,
+            403,
+        )
+
+    def test_hu09_administrator_role_is_not_an_editable_preset(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.ADMINISTRADOR}/",
+            {"permissions": []},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)

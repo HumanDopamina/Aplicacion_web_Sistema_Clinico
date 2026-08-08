@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.db.models import F
+from django.shortcuts import get_object_or_404
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework import generics
@@ -18,10 +19,12 @@ from .serializers import (
     LogoutSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
+    RolePermissionPresetSerializer,
     UserAdminSerializer,
     UserAdminUpdateSerializer,
 )
-from .models import User
+from .models import RolePermissionPreset, User
+from .permissions import PERMISSION_CATALOG, get_effective_permissions
 
 
 PASSWORD_RESET_MESSAGE = (
@@ -49,6 +52,7 @@ class CurrentUserView(APIView):
             "email": user.email,
             "first_name": user.first_name,
             "role": user.role,
+            "permissions": get_effective_permissions(user),
         })
 
 
@@ -149,3 +153,25 @@ class UserDetailView(generics.UpdateAPIView):
     permission_classes = [IsAuthenticated, IsAdministrator]
     serializer_class = UserAdminUpdateSerializer
     queryset = User.objects.all()
+
+
+class RolePermissionPresetCollectionView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    def get(self, request):
+        presets = RolePermissionPreset.objects.order_by("role")
+        return Response({
+            "available_permissions": list(PERMISSION_CATALOG),
+            "presets": RolePermissionPresetSerializer(presets, many=True).data,
+        })
+
+
+class RolePermissionPresetDetailView(APIView):
+    permission_classes = [IsAuthenticated, IsAdministrator]
+
+    def patch(self, request, role):
+        preset = get_object_or_404(RolePermissionPreset, role=role)
+        serializer = RolePermissionPresetSerializer(preset, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)

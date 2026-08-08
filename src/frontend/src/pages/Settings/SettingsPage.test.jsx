@@ -5,7 +5,13 @@ import { AuthContext } from '../../context/authContextValue'
 import * as userService from '../../services/userService'
 import SettingsPage from './SettingsPage'
 
-vi.mock('../../services/userService')
+vi.mock('../../services/userService', () => ({
+  createUser: vi.fn(),
+  listRolePermissionPresets: vi.fn(),
+  listUsers: vi.fn(),
+  updateRolePermissionPreset: vi.fn(),
+  updateUser: vi.fn(),
+}))
 
 const renderPage = () => render(
   <MemoryRouter>
@@ -42,6 +48,22 @@ describe('SettingsPage staff management', () => {
       last_name: 'Vargas',
       role: 'ODONTOLOGO',
       is_active: false,
+    })
+    userService.listRolePermissionPresets.mockResolvedValue({
+      available_permissions: [
+        { code: 'patients.view', label: 'Ver pacientes', group: 'Pacientes' },
+        { code: 'patients.create', label: 'Registrar pacientes', group: 'Pacientes' },
+        { code: 'appointments.view', label: 'Ver citas', group: 'Citas' },
+        { code: 'appointments.create', label: 'Crear citas', group: 'Citas' },
+      ],
+      presets: [
+        { role: 'RECEPCIONISTA', permissions: ['patients.view', 'patients.create', 'appointments.view', 'appointments.create'] },
+        { role: 'ODONTOLOGO', permissions: ['patients.view', 'appointments.view'] },
+      ],
+    })
+    userService.updateRolePermissionPreset.mockResolvedValue({
+      role: 'ODONTOLOGO',
+      permissions: ['patients.view', 'patients.create', 'appointments.view'],
     })
   })
   afterEach(() => {
@@ -83,6 +105,28 @@ describe('SettingsPage staff management', () => {
     expect(screen.getByText('Recepcionista')).toBeInTheDocument()
     expect(screen.getByText('Activo')).toBeInTheDocument()
     expect(screen.getByText('Inactivo')).toBeInTheDocument()
+  })
+
+  it('[HU-09] lets an administrator update the permissions preset for a role', async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: /Permisos por rol/ }))
+    expect(await screen.findByRole('heading', { name: 'Permisos por rol' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Recepcionista' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Odontólogo' }))
+    expect(screen.getByLabelText('Registrar pacientes')).not.toBeChecked()
+
+    fireEvent.click(screen.getByLabelText('Registrar pacientes'))
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar permisos' }))
+
+    await waitFor(() => expect(userService.updateRolePermissionPreset).toHaveBeenCalledWith(
+      'access-token',
+      'ODONTOLOGO',
+      ['patients.view', 'patients.create', 'appointments.view'],
+    ))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Permisos de Odontólogo actualizados.',
+    )
   })
 
   it('registers a member and adds it to the staff list', async () => {
