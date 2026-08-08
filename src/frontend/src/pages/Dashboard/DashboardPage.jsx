@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { listPatients } from '../../services/patientService'
-import PatientFormModal from '../Patients/PatientFormModal'
 
 const initials = (patient) => `${patient.first_name?.[0] || ''}${patient.last_name?.[0] || ''}`.toUpperCase()
 
@@ -19,7 +18,6 @@ function StatCard({ label, value, icon, tone }) {
 
 export default function DashboardPage({ user, accessToken }) {
   const navigate = useNavigate()
-  const [patientFormOpen, setPatientFormOpen] = useState(false)
   const [patients, setPatients] = useState([])
   const [patientsLoading, setPatientsLoading] = useState(true)
   const [patientsError, setPatientsError] = useState('')
@@ -53,7 +51,7 @@ export default function DashboardPage({ user, accessToken }) {
           <p className="mt-1 text-sm text-slate-500">Viernes, 31 de julio</p>
         </div>
         <div className="flex gap-2">
-          {canCreatePatient ? <button type="button" aria-label="Nuevo paciente" onClick={() => setPatientFormOpen(true)} className="rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">+ Nuevo paciente</button> : null}
+          {canCreatePatient ? <button type="button" aria-label="Nuevo paciente" onClick={() => navigate('/pacientes/nuevo')} className="rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">+ Nuevo paciente</button> : null}
           <button type="button" aria-label="Nueva cita" className="rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">+ Nueva cita</button>
         </div>
       </section>
@@ -102,7 +100,6 @@ export default function DashboardPage({ user, accessToken }) {
           </ul> : null}
         </article>
       </section>
-      {patientFormOpen ? <PatientFormModal accessToken={accessToken} onClose={() => setPatientFormOpen(false)} onSaved={(patient) => { setPatientFormOpen(false); navigate(`/pacientes/${patient.id}`) }} /> : null}
     </div>
   )
 }

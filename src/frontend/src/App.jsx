@@ -8,6 +8,7 @@ import ChangePasswordPage from './pages/Auth/ChangePasswordPage'
 import SettingsPage from './pages/Settings/SettingsPage'
 import PatientsPage from './pages/Patients/PatientsPage'
 import PatientDetailPage from './pages/Patients/PatientDetailPage'
+import PatientRecordFormPage from './pages/Patients/PatientRecordFormPage'
 import Navbar from './components/Navbar'
 import Sidebar from './components/Sidebar'
 
@@ -44,6 +45,8 @@ export default function App() {
     <Route path="/cambiar-contrasena" element={<ProtectedLayout><ChangePasswordPage /></ProtectedLayout>} />
     <Route path="/usuarios" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Usuarios" /></ProtectedLayout>} />
     <Route path="/pacientes" element={<ProtectedLayout requiredPermission="patients.view"><PatientsPage /></ProtectedLayout>} />
+    <Route path="/pacientes/nuevo" element={<ProtectedLayout requiredPermission="patients.create"><PatientRecordFormPage /></ProtectedLayout>} />
+    <Route path="/pacientes/:id/editar" element={<ProtectedLayout requiredPermission="patients.edit"><PatientRecordFormPage /></ProtectedLayout>} />
     <Route path="/pacientes/:id" element={<ProtectedLayout requiredPermission="patients.view"><PatientDetailPage /></ProtectedLayout>} />
     <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Clínicas" /></ProtectedLayout>} />
     <Route path="/citas" element={<ProtectedLayout><ModulePage title="Citas" /></ProtectedLayout>} />
