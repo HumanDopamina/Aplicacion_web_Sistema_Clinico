@@ -110,7 +110,7 @@ export default function DashboardPage({ user, accessToken }) {
           {!appointmentsLoading && !appointmentsError && appointments.length > 0 ? <ul className="divide-y divide-slate-100">
             {appointments.slice(0, 4).map((appointment) => <li key={appointment.id}>
               <Link to="/citas" aria-label={`Ver cita de ${appointment.patient_name} a las ${formatClock(appointment.start_time)}`} className="flex items-center gap-4 px-5 py-4 no-underline transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-600">
-                <span className="w-24 shrink-0 font-serif text-lg font-semibold text-blue-700">{formatClock(appointment.start_time)}–{formatClock(appointment.end_time)}</span>
+                <span className="w-28 shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums text-blue-700">{formatClock(appointment.start_time)}–{formatClock(appointment.end_time)}</span>
                 <span className="min-w-0 flex-1">
                   <strong className="block truncate text-sm text-slate-900">{appointment.patient_name}</strong>
                   <small className="mt-0.5 block truncate text-xs text-slate-500">{appointment.reason} · {appointment.dentist_name}</small>
