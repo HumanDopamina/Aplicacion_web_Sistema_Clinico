@@ -12,20 +12,27 @@
 
 ## Alcance implementado
 
-- La recepcionista con el permiso `patients.create` puede abrir **Nuevo paciente** desde `/pacientes`.
-- **Nuevo paciente** en el dashboard abre el mismo formulario reutilizable y también navega al expediente después del alta.
+- La recepcionista con el permiso `patients.create` puede abrir **Nuevo paciente** desde `/pacientes` o el dashboard; ambas acciones navegan a `/pacientes/nuevo`.
+- Alta, visualización y edición usan una sola vista principal inspirada en Odoo: conservan el encabezado, las tarjetas, la distribución y las tabs **Resumen clínico**, **Consultas**, **Odontograma** y **Documentos**.
+- `/pacientes/nuevo` activa `isNew=true`; `/pacientes/{id}` carga el mismo componente con un borrador basado en la última versión persistida.
 - El dashboard consulta el mismo listado persistido que `/pacientes`, actualiza el total y muestra hasta los cuatro registros más recientes con acceso directo a su expediente.
-- El formulario registra nombres, apellidos, lugar y fecha de nacimiento, género, cédula, contacto, dirección y contacto de emergencia.
+- El formulario reúne en doce secciones los datos personales, consulta inicial, motivo, enfermedad actual, interrogatorio por sistemas, antecedentes familiares, enfermedades infectocontagiosas y hereditarias, examen físico, observaciones, diagnóstico, plan, presupuesto y tratamiento.
+- **Resumen clínico** no muestra ni edita una tarjeta de archivos clínicos. Radiografías, fotografías y demás adjuntos se gestionarán exclusivamente desde la pestaña **Documentos**.
 - Son obligatorios: nombres, primer apellido, lugar de nacimiento, cédula, género y fecha de nacimiento.
+- La fecha y la hora de la consulta inicial son opcionales; si quedan vacías, el frontend las envía como `null`, de acuerdo con el contrato del expediente clínico.
 - La API rechaza fechas futuras y cédulas duplicadas sin distinguir mayúsculas/minúsculas.
 - El sistema genera el código inmutable `PAC-00001` a partir del identificador interno.
 - Después de guardar, la interfaz navega a `/pacientes/{id}` y muestra el expediente inicial.
-- El expediente conserva datos personales y contacto de emergencia. Resumen clínico, antecedentes, consultas, odontograma y documentos muestran estados vacíos hasta sus historias correspondientes.
-- Los botones **Editar** de información personal y contacto de emergencia abren el formulario precargado y refrescan el expediente con la respuesta guardada.
+- El expediente de lectura conserva el diseño de tarjetas existente y presenta todos los valores persistidos; los opcionales vacíos se identifican como **Sin información registrada**.
+- No existe un interruptor global de edición. Con `patients.edit`, los valores son controles en línea con apariencia de texto; el borde se revela al pasar el cursor o enfocar el campo.
+- La nube **Guardar cambios** y la X **Descartar cambios** aparecen solo cuando el borrador cambia. Guardar actualiza la línea base; descartar restaura el expediente existente o abandona un alta nueva.
+- Si se intenta navegar, recargar o cerrar con cambios pendientes, el sistema advierte antes de perderlos. Un error de API conserva el borrador para reintentar.
+- Los errores de validación, incluso cuando pertenecen al objeto anidado `clinical_record`, muestran el mensaje específico de la API en lugar de ocultarlo tras un aviso genérico.
 
 ## Modelo y seguridad
 
-- `Patient` constituye la identidad base del expediente; el usuario que lo registró queda preservado mediante `registered_by` con eliminación protegida.
+- `Patient` conserva identidad, contacto y datos demográficos permanentes; `ClinicalRecord` mantiene una relación uno-a-uno con la consulta clínica inicial.
+- La creación anidada de ambos modelos se ejecuta dentro de una transacción para evitar expedientes parciales.
 - `code`, `registered_by`, `created_at` y `updated_at` son campos de solo lectura en la API.
 - `GET /api/patients/` y `GET /api/patients/{id}/` requieren `patients.view`.
 - `POST /api/patients/` requiere `patients.create`.
@@ -38,20 +45,23 @@
 | Método | Endpoint | Capacidad | Resultado |
 |---|---|---|---|
 | `GET` | `/api/patients/` | `patients.view` | Lista y búsqueda con `?search=`. |
-| `POST` | `/api/patients/` | `patients.create` | Registra un paciente y devuelve su expediente base. |
-| `GET` | `/api/patients/{id}/` | `patients.view` | Devuelve el expediente base. |
-| `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza los campos editables del expediente base. |
+| `POST` | `/api/patients/` | `patients.create` | Registra `Patient` y su objeto anidado `clinical_record`. |
+| `GET` | `/api/patients/{id}/` | `patients.view` | Devuelve la identidad y el expediente clínico completo. |
+| `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza datos permanentes y el objeto `clinical_record`. |
 
 ## Evidencia automatizada
 
-- Backend `[HU-10]`: creación por recepcionista, apertura del detalle, código automático, persistencia, búsqueda, permisos editables, acceso administrativo, fecha futura, duplicidad de cédula y campos internos de solo lectura.
-- Frontend `[HU-10]`: listado vacío → formulario → `POST` → navegación automática → nombre y código visibles en el expediente.
-- Dashboard: la acción rápida abre el diálogo real de registro y queda protegida por `patients.create`; el total y los pacientes recientes se cargan desde `GET /api/patients/`.
+- Backend `[HU-10]`: creación transaccional del paciente y expediente completo, apertura del detalle, código automático, persistencia, búsqueda, permisos editables, acceso administrativo, fecha futura, duplicidad de cédula y campos internos de solo lectura.
+- Frontend `[HU-10]`: una sola vista cubre `isNew`, edición inmediata por permiso, detección de cambios, `POST`, `PATCH`, descarte, errores y protección de navegación conservando estructura y tabs. La creación prueba además la normalización a `null` de fecha/hora opcionales vacías.
+- Cliente API: una prueba de regresión comprueba que los errores anidados del expediente se presentan de forma legible.
+- Dashboard: la acción rápida abre `/pacientes/nuevo` y queda protegida por `patients.create`; el total y los pacientes recientes se cargan desde `GET /api/patients/`.
 - Servicio frontend: listado/búsqueda, creación y detalle con autenticación Bearer.
 - Edición: permiso configurable, rechazo `403`, campos técnicos inmutables, formulario precargado, `PATCH` y actualización visible.
 
 ## Decisiones de alcance
 
-- HU-10 crea el expediente base, no datos clínicos ficticios.
-- Registrar consultas, antecedentes, signos vitales, odontograma y documentos requiere historias posteriores.
+- La edad se deriva de la fecha de nacimiento y no se almacena como dato duplicado.
+- Las enfermedades se guardan como selecciones estructuradas. Los campos heredados de referencias radiográficas y fotográficas se conservan temporalmente en el backend para no perder datos existentes, pero quedan fuera del formulario hasta su migración al módulo documental.
+- Los apartados excluidos expresamente por la fuente no forman parte del modelo.
+- Consultas posteriores, odontograma y carga binaria de documentos requieren historias posteriores.
 - La separación por clínica deberá incorporarse cuando exista la relación operativa entre usuarios, clínicas y pacientes.

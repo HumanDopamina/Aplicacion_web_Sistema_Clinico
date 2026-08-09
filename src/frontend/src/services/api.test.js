@@ -37,4 +37,16 @@ describe('apiRequest session renewal', () => {
     })
     expect(fetchMock.mock.calls[3][1].headers.Authorization).toBe('Bearer renewed-access')
   })
+
+  it('reports nested API validation errors instead of a generic message', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      clinical_record: {
+        consultation_date: ['La fecha de consulta no tiene un formato válido.'],
+      },
+    }), { status: 400 })))
+
+    await expect(apiRequest('/api/patients/', { method: 'POST' })).rejects.toThrow(
+      'La fecha de consulta no tiene un formato válido.',
+    )
+  })
 })

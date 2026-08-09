@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listPatients } from '../../services/patientService'
 import DashboardPage from './DashboardPage'
@@ -71,21 +71,23 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('Aún no hay pacientes registrados.')).not.toBeInTheDocument()
   })
 
-  it('opens the same patient registration form from the dashboard action', () => {
+  it('opens the full patient record page from the dashboard action', () => {
     render(
       <MemoryRouter>
-        <DashboardPage
-          user={{ first_name: 'Recepción', role: 'RECEPCIONISTA', permissions: ['patients.create'] }}
-          accessToken="access-token"
-        />
+        <Routes>
+          <Route path="/" element={<DashboardPage
+            user={{ first_name: 'Recepción', role: 'RECEPCIONISTA', permissions: ['patients.create'] }}
+            accessToken="access-token"
+          />} />
+          <Route path="/pacientes/nuevo" element={<h1>Nuevo paciente</h1>} />
+        </Routes>
       </MemoryRouter>,
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Nuevo paciente' }))
 
-    expect(screen.getByRole('dialog', { name: 'Añadir nuevo paciente' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Cédula', { exact: true })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Añadir paciente' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Nuevo paciente' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('does not offer patient registration without the configured permission', () => {
