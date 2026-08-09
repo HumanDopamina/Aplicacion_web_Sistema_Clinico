@@ -29,10 +29,11 @@ function errorMessage(data) {
 export async function apiRequest(path, options = {}) {
   const { _retried, ...requestOptions } = options
   const currentAccess = options.headers?.Authorization && storedSession()?.session?.access
+  const contentHeaders = options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }
   const response = await fetch(`${API_URL}${path}`, {
     ...requestOptions,
     headers: {
-      'Content-Type': 'application/json',
+      ...contentHeaders,
       ...options.headers,
       ...(currentAccess ? { Authorization: `Bearer ${currentAccess}` } : {}),
     },

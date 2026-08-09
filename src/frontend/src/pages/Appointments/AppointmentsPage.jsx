@@ -6,6 +6,8 @@ import {
   updateAppointment,
 } from '../../services/appointmentService'
 import { listPatients } from '../../services/patientService'
+import { listClinicServices } from '../../services/clinicService'
+import { useClinic } from '../../context/clinicContextValue'
 import AppointmentDetailsPanel from './AppointmentDetailsPanel'
 import AppointmentFormPanel from './AppointmentFormPanel'
 import AppointmentMonthView from './AppointmentMonthView'
@@ -24,10 +26,12 @@ const can = (user, permission) => user.role === 'ADMINISTRADOR' || user.permissi
 
 export default function AppointmentsPage() {
   const { user, accessToken } = useAuth()
-  const [selectedDate, setSelectedDate] = useState(todayValue)
+  const { profile } = useClinic()
+  const [selectedDate, setSelectedDate] = useState(() => todayValue(profile.timezone))
   const [calendarView, setCalendarView] = useState('day')
   const [appointments, setAppointments] = useState([])
   const [patients, setPatients] = useState([])
+  const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -48,11 +52,13 @@ export default function AppointmentsPage() {
     Promise.all([
       listAppointments(accessToken, agendaFilters),
       listPatients(accessToken),
+      listClinicServices(accessToken),
     ])
-      .then(([appointmentData, patientData]) => {
+      .then(([appointmentData, patientData, serviceData]) => {
         if (!active) return
         setAppointments(appointmentData)
         setPatients(patientData.filter((patient) => patient.is_active))
+        setServices(serviceData)
       })
       .catch((requestError) => { if (active) setError(requestError.message) })
       .finally(() => { if (active) setLoading(false) })
@@ -127,7 +133,7 @@ export default function AppointmentsPage() {
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" aria-label={`${viewLabel[calendarView]} anterior`} onClick={() => navigate(-1)} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-white text-lg text-slate-600 shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">‹</button>
-        <button type="button" onClick={() => setSelectedDate(todayValue())} className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Hoy</button>
+        <button type="button" onClick={() => setSelectedDate(todayValue(profile.timezone))} className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Hoy</button>
         <label className="sr-only" htmlFor="agenda-date">Fecha de agenda</label>
         <input id="agenda-date" aria-label="Fecha de agenda" type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
         <button type="button" aria-label={`${viewLabel[calendarView]} siguiente`} onClick={() => navigate(1)} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-white text-lg text-slate-600 shadow-sm hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">›</button>
@@ -151,13 +157,13 @@ export default function AppointmentsPage() {
       {loading ? <div className="grid min-h-72 place-content-center rounded-2xl border border-slate-200 bg-white text-center shadow-sm"><span className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-blue-100 border-t-blue-700" aria-hidden="true" /><p className="mt-3 text-sm text-slate-500">Cargando agenda…</p></div> : null}
       {error ? <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700"><strong className="block">No fue posible cargar la agenda.</strong><span>{error}</span><button type="button" onClick={loadAgenda} className="mt-3 block font-semibold underline">Intentar de nuevo</button></div> : null}
       {!loading && !error && appointments.length === 0 && calendarView === 'day' ? <div className="grid min-h-72 place-content-center rounded-2xl border border-dashed border-blue-200 bg-white px-6 py-12 text-center shadow-sm"><span aria-hidden="true" className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-2xl text-blue-700">▦</span><p className="mt-4 text-sm font-semibold text-slate-800">No hay citas programadas para este día.</p><p className="mt-1 text-xs text-slate-500">Elige otra fecha o programa una nueva cita.</p>{canCreate ? <button type="button" aria-label="Programar primera cita" onClick={openCreate} className="mx-auto mt-5 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white">Nueva cita</button> : null}</div> : null}
-      {!loading && !error && calendarView === 'day' ? <AppointmentTimeline appointments={appointments} selectedDate={selectedDate} onSelect={setSelectedAppointment} /> : null}
+      {!loading && !error && calendarView === 'day' ? <AppointmentTimeline appointments={appointments} selectedDate={selectedDate} onSelect={setSelectedAppointment} timeZone={profile.timezone} /> : null}
       {!loading && !error && calendarView === 'week' ? <AppointmentWeekView appointments={appointments} selectedDate={selectedDate} onOpenDay={openDay} onSelect={setSelectedAppointment} /> : null}
       {!loading && !error && calendarView === 'month' ? <AppointmentMonthView appointments={appointments} selectedDate={selectedDate} onOpenDay={openDay} onSelect={setSelectedAppointment} /> : null}
     </section>
 
     {toast ? <div role="status" className="fixed bottom-5 right-5 z-[60] rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-xl">{toast}</div> : null}
-    {formOpen ? <AppointmentFormPanel accessToken={accessToken} appointment={formAppointment} patients={patients} selectedDate={selectedDate} onClose={() => setFormOpen(false)} onSave={saveAppointment} /> : null}
+    {formOpen ? <AppointmentFormPanel accessToken={accessToken} appointment={formAppointment} patients={patients} services={services} selectedDate={selectedDate} onClose={() => setFormOpen(false)} onSave={saveAppointment} /> : null}
     {selectedAppointment ? <AppointmentDetailsPanel appointment={selectedAppointment} canEdit={canEdit} onClose={() => setSelectedAppointment(null)} onEdit={editSelected} onStatus={changeStatus} /> : null}
   </div>
 }

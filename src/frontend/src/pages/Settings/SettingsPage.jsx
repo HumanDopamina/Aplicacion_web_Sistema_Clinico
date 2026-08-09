@@ -1,7 +1,11 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useAuth } from '../../context/authContextValue'
 import { createUser, listUsers, updateUser } from '../../services/userService'
 import RolePermissionsPanel from './RolePermissionsPanel'
+
+const ClinicProfilePanel = lazy(() => import('./ClinicProfilePanel'))
+const BusinessHoursPanel = lazy(() => import('./BusinessHoursPanel'))
+const ServicesPanel = lazy(() => import('./ServicesPanel'))
 
 const settingsSections = [
   ['▤', 'Perfil de la clínica', 'Datos básicos y logo'],
@@ -162,9 +166,9 @@ export default function SettingsPage() {
         <nav aria-label="Secciones de configuración" className="flex gap-2 overflow-x-auto lg:block lg:space-y-3">
           {settingsSections.map(([icon, title, description]) => {
             const active = title === activeSection
-            const available = title === 'Gestión de Staff' || title === 'Permisos por rol'
+            const available = title !== 'Notificaciones'
             return (
-              <button key={title} type="button" onClick={() => { if (available) setActiveSection(title) }} aria-current={active ? 'page' : undefined} className={`flex min-w-60 items-center gap-3 rounded-xl border p-2.5 text-left transition ${active ? 'border-2 border-blue-700 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+              <button key={title} type="button" disabled={!available} onClick={() => { if (available) setActiveSection(title) }} aria-current={active ? 'page' : undefined} className={`flex min-w-60 items-center gap-3 rounded-xl border p-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${active ? 'border-2 border-blue-700 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
                 <span aria-hidden="true" className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${active ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'}`}>{icon}</span>
                 <span><strong className="block text-sm">{title}</strong><small className="block text-[11px] opacity-70">{description}</small></span>
               </button>
@@ -204,7 +208,12 @@ export default function SettingsPage() {
               </table>
             </div>
           ) : null}
-        </section> : <RolePermissionsPanel accessToken={accessToken} />}
+        </section> : <Suspense fallback={<div className="grid min-h-80 place-items-center rounded-2xl border border-slate-200 bg-white text-sm text-slate-500">Cargando configuración…</div>}>
+          {activeSection === 'Perfil de la clínica' ? <ClinicProfilePanel accessToken={accessToken} /> : null}
+          {activeSection === 'Horarios de atención' ? <BusinessHoursPanel accessToken={accessToken} /> : null}
+          {activeSection === 'Servicios y tarifas' ? <ServicesPanel accessToken={accessToken} /> : null}
+          {activeSection === 'Permisos por rol' ? <RolePermissionsPanel accessToken={accessToken} /> : null}
+        </Suspense>}
       </div>
       {formOpen ? <MemberForm onClose={() => setFormOpen(false)} onSaved={saveUser} accessToken={accessToken} editingUser={editingUser} /> : null}
     </div>

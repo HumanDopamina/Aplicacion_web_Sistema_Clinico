@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { listAppointments } from '../../services/appointmentService'
 import { listPatients } from '../../services/patientService'
 import { formatClock, statusTone, todayValue } from '../Appointments/appointmentDisplay'
+import { useClinic } from '../../context/clinicContextValue'
 
 const initials = (patient) => `${patient.first_name?.[0] || ''}${patient.last_name?.[0] || ''}`.toUpperCase()
 
@@ -26,6 +27,7 @@ function StatCard({ label, value, icon, tone }) {
 }
 
 export default function DashboardPage({ user, accessToken }) {
+  const { profile } = useClinic()
   const navigate = useNavigate()
   const [patients, setPatients] = useState([])
   const [patientsLoading, setPatientsLoading] = useState(true)
@@ -33,7 +35,7 @@ export default function DashboardPage({ user, accessToken }) {
   const [appointments, setAppointments] = useState([])
   const [appointmentsLoading, setAppointmentsLoading] = useState(true)
   const [appointmentsError, setAppointmentsError] = useState('')
-  const currentDate = todayValue()
+  const currentDate = todayValue(profile.timezone)
   const name = user?.first_name || 'Arguello'
   const canCreatePatient = user?.role === 'ADMINISTRADOR' || user?.permissions?.includes('patients.create')
   const canViewPatients = user?.role === 'ADMINISTRADOR' || user?.permissions?.includes('patients.view')

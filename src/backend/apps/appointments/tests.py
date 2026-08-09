@@ -1,7 +1,16 @@
-from datetime import date, time
+from datetime import date, time, timedelta
 
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from apps.clinics.models import (
+    BusinessBreak,
+    BusinessHour,
+    ClinicProfile,
+    ClinicService,
+    HolidayClosure,
+    ServiceCategory,
+)
 from apps.patients.models import Patient
 from apps.users.models import RolePermissionPreset, User
 
@@ -280,3 +289,156 @@ class AppointmentApiTests(APITestCase):
             self.client.patch(detail_url, {"reason": "Sin permiso"}, format="json").status_code,
             403,
         )
+
+    def test_accepts_15_minute_blocks_and_optional_active_service(self):
+        category = ServiceCategory.objects.create(name="Ortodoncia")
+        service = ClinicService.objects.create(
+            category=category,
+            name="Control de ortodoncia",
+            duration_minutes=15,
+            price="450.00",
+        )
+        self.client.force_authenticate(self.receptionist)
+
+        minimum = self.client.post(
+            self.list_url,
+            self.payload(service=service.pk, duration_minutes=15),
+            format="json",
+        )
+        maximum = self.client.post(
+            self.list_url,
+            self.payload(
+                patient=self.other_patient.pk,
+                dentist=self.other_dentist.pk,
+                start_time="12:00",
+                duration_minutes=240,
+            ),
+            format="json",
+        )
+        invalid = self.client.post(
+            self.list_url,
+            self.payload(start_time="15:00", duration_minutes=20),
+            format="json",
+        )
+
+        self.assertEqual(minimum.status_code, 201)
+        self.assertEqual(minimum.data["service"], service.pk)
+        self.assertEqual(minimum.data["service_name"], "Control de ortodoncia")
+        self.assertEqual(maximum.status_code, 201)
+        self.assertEqual(invalid.status_code, 400)
+        self.assertIn("15", str(invalid.data))
+
+    def test_archived_service_cannot_be_selected_but_remains_on_historical_appointment(self):
+        category = ServiceCategory.objects.create(name="General")
+        service = ClinicService.objects.create(
+            category=category,
+            name="Limpieza",
+            duration_minutes=45,
+            price="650.00",
+        )
+        appointment = self.create_appointment(service=service)
+        service.is_active = False
+        service.save(update_fields=("is_active",))
+        self.client.force_authenticate(self.receptionist)
+
+        rejected = self.client.post(
+            self.list_url,
+            self.payload(service=service.pk, start_time="11:00"),
+            format="json",
+        )
+        retained = self.client.patch(
+            f"{self.list_url}{appointment.pk}/",
+            {"notes": "Conservar servicio archivado"},
+            format="json",
+        )
+
+        self.assertEqual(rejected.status_code, 400)
+        self.assertEqual(retained.status_code, 200)
+        self.assertEqual(retained.data["service"], service.pk)
+        self.assertEqual(retained.data["service_name"], "Limpieza")
+
+    def test_configured_schedule_rejects_closed_hours_breaks_and_holidays(self):
+        appointment_date = date(2027, 8, 9)  # Monday.
+        profile = ClinicProfile.load()
+        profile.schedule_configured = True
+        profile.save(update_fields=("schedule_configured",))
+        monday = BusinessHour.objects.get(weekday=0)
+        monday.is_open = True
+        monday.opens_at = time(8, 0)
+        monday.closes_at = time(17, 0)
+        monday.save()
+        BusinessBreak.objects.create(
+            business_hour=monday,
+            starts_at=time(12, 0),
+            ends_at=time(13, 0),
+        )
+        self.client.force_authenticate(self.receptionist)
+
+        valid = self.client.post(
+            self.list_url,
+            self.payload(date=appointment_date.isoformat(), start_time="09:00"),
+            format="json",
+        )
+        outside = self.client.post(
+            self.list_url,
+            self.payload(
+                patient=self.other_patient.pk,
+                dentist=self.other_dentist.pk,
+                date=appointment_date.isoformat(),
+                start_time="16:30",
+                duration_minutes=60,
+            ),
+            format="json",
+        )
+        on_break = self.client.post(
+            self.list_url,
+            self.payload(
+                patient=self.other_patient.pk,
+                dentist=self.other_dentist.pk,
+                date=appointment_date.isoformat(),
+                start_time="12:30",
+                duration_minutes=30,
+            ),
+            format="json",
+        )
+        HolidayClosure.objects.create(
+            name="Fiesta local",
+            date=date(2026, 8, 10),
+            repeats_annually=True,
+        )
+        holiday = self.client.post(
+            self.list_url,
+            self.payload(
+                patient=self.other_patient.pk,
+                dentist=self.other_dentist.pk,
+                date="2027-08-10",
+                start_time="09:00",
+            ),
+            format="json",
+        )
+
+        self.assertEqual(valid.status_code, 201)
+        self.assertEqual(outside.status_code, 400)
+        self.assertIn("jornada", str(outside.data).lower())
+        self.assertEqual(on_break.status_code, 400)
+        self.assertIn("pausa", str(on_break.data).lower())
+        self.assertEqual(holiday.status_code, 400)
+        self.assertIn("cerrada", str(holiday.data).lower())
+
+    def test_availability_applies_the_clinic_schedule(self):
+        next_day = timezone.localdate() + timedelta(days=1)
+        profile = ClinicProfile.load()
+        profile.schedule_configured = True
+        profile.save(update_fields=("schedule_configured",))
+        business_hour = BusinessHour.objects.get(weekday=next_day.weekday())
+        business_hour.is_open = False
+        business_hour.save()
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.get(
+            f"{self.list_url}dentists/availability/"
+            f"?date={next_day.isoformat()}&start_time=09:00&duration_minutes=30",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cerrada", str(response.data).lower())

@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext } from '../../context/authContextValue'
 import * as userService from '../../services/userService'
+import * as clinicService from '../../services/clinicService'
 import SettingsPage from './SettingsPage'
 
 vi.mock('../../services/userService', () => ({
@@ -11,6 +12,13 @@ vi.mock('../../services/userService', () => ({
   listUsers: vi.fn(),
   updateRolePermissionPreset: vi.fn(),
   updateUser: vi.fn(),
+}))
+vi.mock('../../services/clinicService', () => ({
+  createClinicService: vi.fn(), createClosure: vi.fn(), createServiceCategory: vi.fn(),
+  getBusinessHours: vi.fn(), getClinicOptions: vi.fn(), listClinicServices: vi.fn(),
+  listClosures: vi.fn(), listServiceCategories: vi.fn(), updateBusinessHours: vi.fn(),
+  updateClinicProfile: vi.fn(), updateClinicService: vi.fn(), updateClosure: vi.fn(),
+  updateServiceCategory: vi.fn(),
 }))
 
 const renderPage = () => render(
@@ -32,6 +40,15 @@ const fillForm = () => {
 
 describe('SettingsPage staff management', () => {
   beforeEach(() => {
+    clinicService.getClinicOptions.mockResolvedValue({
+      currencies: [{ value: 'NIO', label: 'Córdoba' }],
+      timezones: ['America/Managua'],
+    })
+    clinicService.getBusinessHours.mockResolvedValue({ days: Array.from({ length: 7 }, (_, weekday) => ({ weekday, is_open: false, opens_at: null, closes_at: null, breaks: [] })) })
+    clinicService.listClosures.mockResolvedValue([])
+    clinicService.listServiceCategories.mockResolvedValue([])
+    clinicService.listClinicServices.mockResolvedValue([])
+    clinicService.updateClinicProfile.mockResolvedValue({ name: 'Clínica Argüello', tagline: '', phone: '', email: '', address: '', logo_url: '', currency: 'NIO', timezone: 'America/Managua' })
     userService.listUsers.mockResolvedValue([])
     userService.createUser.mockResolvedValue({
       id: 2,
@@ -78,6 +95,21 @@ describe('SettingsPage staff management', () => {
 
     expect(await screen.findByText('Aún no hay miembros registrados.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Añadir miembro' })).toBeInTheDocument()
+  })
+
+  it('opens operational panels only when selected and saves the clinic profile', async () => {
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: /Perfil de la clínica/ }))
+    expect(await screen.findByRole('heading', { name: 'Perfil de la clínica' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Nombre de la clínica'), { target: { value: 'Clínica Argüello' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+    await waitFor(() => expect(clinicService.updateClinicProfile).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: /Horarios de atención/ }))
+    expect(await screen.findByRole('heading', { name: 'Horarios de atención' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Servicios y tarifas/ }))
+    expect(await screen.findByRole('heading', { name: 'Servicios y tarifas' })).toBeInTheDocument()
+    expect(screen.getByText('Aún no hay categorías.')).toBeInTheDocument()
   })
 
   it('[HU-09] shows every registered user with role and active status', async () => {

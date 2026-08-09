@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { getAvailableDentists } from '../../services/appointmentService'
 
 const EMPTY_FORM = {
-  patient: '', dentist: '', date: '', start_time: '09:00', duration_minutes: '60', reason: '', notes: '',
+  patient: '', dentist: '', service: '', date: '', start_time: '09:00', duration_minutes: '60', reason: '', notes: '',
 }
 
 export default function AppointmentFormPanel({
-  accessToken, appointment, patients, selectedDate, onClose, onSave,
+  accessToken, appointment, patients, services, selectedDate, onClose, onSave,
 }) {
   const titleRef = useRef(null)
   const [values, setValues] = useState(EMPTY_FORM)
@@ -20,6 +20,7 @@ export default function AppointmentFormPanel({
     setValues(appointment ? {
       patient: String(appointment.patient),
       dentist: String(appointment.dentist),
+      service: appointment.service ? String(appointment.service) : '',
       date: appointment.date,
       start_time: appointment.start_time.slice(0, 5),
       duration_minutes: String(appointment.duration_minutes),
@@ -73,6 +74,22 @@ export default function AppointmentFormPanel({
     setError('')
   }
 
+  const changeService = (event) => {
+    const selected = services.find((item) => String(item.id) === event.target.value)
+    setValues((current) => {
+      const previous = services.find((item) => String(item.id) === current.service)
+      return {
+        ...current,
+        service: event.target.value,
+        duration_minutes: selected ? String(selected.duration_minutes) : current.duration_minutes,
+        reason: selected && (!current.reason.trim() || current.reason === previous?.name)
+          ? selected.name
+          : current.reason,
+      }
+    })
+    setError('')
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     setSaving(true)
@@ -81,6 +98,7 @@ export default function AppointmentFormPanel({
       await onSave({
         patient: Number(values.patient),
         dentist: Number(values.dentist),
+        service: values.service ? Number(values.service) : null,
         date: values.date,
         start_time: values.start_time,
         duration_minutes: Number(values.duration_minutes),
@@ -109,7 +127,8 @@ export default function AppointmentFormPanel({
           <label className="text-sm font-semibold text-slate-700">Fecha<input required type="date" value={values.date} onChange={change('date')} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /></label>
           <label className="text-sm font-semibold text-slate-700">Hora<input required type="time" value={values.start_time} onChange={change('start_time')} className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /></label>
         </div>
-        <label className="block text-sm font-semibold text-slate-700">Duración<select value={values.duration_minutes} onChange={change('duration_minutes')} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">60 minutos</option><option value="90">90 minutos</option></select></label>
+        <label className="block text-sm font-semibold text-slate-700">Servicio <span className="font-normal text-slate-400">(opcional)</span><select value={values.service} onChange={changeService} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="">Sin servicio del catálogo</option>{services.filter((item) => item.is_active || item.id === appointment?.service).map((item) => <option key={item.id} value={item.id}>{item.name}{item.is_active ? '' : ' · archivado'}</option>)}</select></label>
+        <label className="block text-sm font-semibold text-slate-700">Duración<select value={values.duration_minutes} onChange={change('duration_minutes')} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">{Array.from({ length: 16 }, (_, index) => (index + 1) * 15).map((minutes) => <option key={minutes} value={minutes}>{minutes} minutos</option>)}</select></label>
         <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
           <label className="block text-sm font-semibold text-slate-700">Buscar paciente<input type="search" value={patientSearch} onChange={(event) => setPatientSearch(event.target.value)} placeholder="Nombre, código o teléfono" className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /></label>
           <label className="mt-4 block text-sm font-semibold text-slate-700">Paciente<select required value={values.patient} onChange={change('patient')} className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="">Selecciona un paciente</option>{filteredPatients.map((patient) => <option key={patient.id} value={patient.id}>{patient.full_name} · {patient.code}</option>)}</select></label>
