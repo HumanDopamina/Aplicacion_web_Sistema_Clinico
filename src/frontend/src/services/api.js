@@ -47,7 +47,10 @@ export async function apiRequest(path, options = {}) {
     })
   }
   if (!response.ok) {
-    throw new Error(errorMessage(data))
+    const error = new Error(errorMessage(data))
+    error.status = response.status
+    error.data = data
+    throw error
   }
   return data
 }

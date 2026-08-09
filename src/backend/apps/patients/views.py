@@ -1,11 +1,20 @@
+from django.http import Http404
 from django.shortcuts import get_object_or_404
-from rest_framework import filters, generics
+from rest_framework import filters, generics, status
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from apps.users.permissions import HasCapability
 
-from .models import Consultation, Patient
-from .serializers import ConsultationSerializer, PatientSerializer
+from .models import Consultation, OdontogramVersion, Patient
+from .odontograms import OdontogramConflict
+from .serializers import (
+    ConsultationSerializer,
+    OdontogramRevisionCreateSerializer,
+    OdontogramVersionSerializer,
+    OdontogramVersionSummarySerializer,
+    PatientSerializer,
+)
 
 
 class PatientListCreateView(generics.ListCreateAPIView):
@@ -82,3 +91,96 @@ class PatientConsultationDetailView(generics.RetrieveUpdateAPIView):
         return Consultation.objects.select_related("professional").filter(
             patient_id=self.kwargs["patient_pk"]
         )
+
+
+class ConsultationOdontogramView(generics.RetrieveAPIView):
+    serializer_class = OdontogramVersionSerializer
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {
+        "GET": "consultations.view",
+        "PATCH": "consultations.edit",
+        "DELETE": "consultations.edit",
+    }
+
+    def get_object(self):
+        consultation = get_object_or_404(
+            Consultation,
+            pk=self.kwargs["consultation_pk"],
+            patient_id=self.kwargs["patient_pk"],
+        )
+        version = (
+            OdontogramVersion.objects.select_related("consultation", "created_by")
+            .filter(consultation=consultation)
+            .order_by("-version_number")
+            .first()
+        )
+        if version is None:
+            raise Http404
+        return version
+
+
+class ConsultationOdontogramVersionCreateView(generics.CreateAPIView):
+    serializer_class = OdontogramRevisionCreateSerializer
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {
+        "POST": "consultations.edit",
+        "PATCH": "consultations.edit",
+        "DELETE": "consultations.edit",
+    }
+
+    def get_consultation(self):
+        return get_object_or_404(
+            Consultation,
+            pk=self.kwargs["consultation_pk"],
+            patient_id=self.kwargs["patient_pk"],
+        )
+
+    def get_serializer_context(self):
+        return {
+            **super().get_serializer_context(),
+            "consultation": self.get_consultation(),
+        }
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except OdontogramConflict as error:
+            return Response(
+                {
+                    "detail": str(error),
+                    "current_version_id": error.current_version_id,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+
+class PatientOdontogramVersionListView(generics.ListAPIView):
+    serializer_class = OdontogramVersionSummarySerializer
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {
+        "GET": "consultations.view",
+        "PATCH": "consultations.edit",
+        "DELETE": "consultations.edit",
+    }
+
+    def get_queryset(self):
+        patient = get_object_or_404(Patient, pk=self.kwargs["patient_pk"])
+        return OdontogramVersion.objects.select_related(
+            "consultation", "created_by"
+        ).filter(patient=patient)
+
+
+class PatientOdontogramVersionDetailView(generics.RetrieveAPIView):
+    serializer_class = OdontogramVersionSerializer
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {
+        "GET": "consultations.view",
+        "PATCH": "consultations.edit",
+        "DELETE": "consultations.edit",
+    }
+    http_method_names = ("get", "head", "options")
+
+    def get_queryset(self):
+        return OdontogramVersion.objects.select_related(
+            "consultation", "created_by"
+        ).filter(patient_id=self.kwargs["patient_pk"])

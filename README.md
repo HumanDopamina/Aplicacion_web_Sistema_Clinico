@@ -15,6 +15,7 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Registro y búsqueda de pacientes con apertura automática de su expediente clínico completo.
 - Detección robusta de pacientes duplicados por identificación, ignorando guiones, espacios y mayúsculas sin alterar el formato visible.
 - Historial, creación, visualización y edición en línea de consultas clínicas por paciente.
+- Odontogramas FDI por consulta con revisiones inmutables y comparación histórica por paciente.
 
 ## Tecnologías
 
@@ -201,6 +202,10 @@ Los enlaces de recuperación:
 | `POST` | `/api/patients/{id}/consultations/` | `consultations.create` | Registra una consulta y asigna el profesional autenticado. |
 | `GET` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.view` | Abre la ficha clínica completa de la consulta. |
 | `PATCH` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.edit` | Actualiza la consulta sin cambiar paciente o profesional. |
+| `GET` | `/api/patients/{id}/consultations/{consultationId}/odontogram/` | `consultations.view` | Devuelve la última versión del odontograma de la consulta. |
+| `POST` | `/api/patients/{id}/consultations/{consultationId}/odontogram/versions/` | `consultations.edit` | Guarda una revisión inmutable con control de concurrencia. |
+| `GET` | `/api/patients/{id}/odontogram-versions/` | `consultations.view` | Lista el histórico de versiones del paciente. |
+| `GET` | `/api/patients/{id}/odontogram-versions/{versionId}/` | `consultations.view` | Devuelve el snapshot completo de una versión. |
 
 ## Pruebas y validación
 
@@ -274,6 +279,16 @@ La pestaña **Consultas** muestra el historial clínico persistido del paciente 
 
 El administrador gestiona `consultations.view`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
 
+### Odontogramas por consulta
+
+1. Abre una consulta guardada y selecciona **Odontograma** en la navegación contextual.
+2. Elige dentición temporal, mixta o permanente y trabaja sobre **Estado actual** o **Plan de tratamiento**.
+3. Selecciona un hallazgo y activa las superficies de cada pieza; el panel permite estados de pieza completa, nota clínica, marcar sano o restablecer.
+4. La nube crea una nueva versión y la X restaura el último snapshot persistido. Los cambios sin guardar bloquean la salida.
+5. Abre la pestaña **Odontograma** del expediente para revisar la línea temporal y comparar dos versiones arbitrarias.
+
+Cada nueva consulta hereda el odontograma más reciente del paciente. Las versiones anteriores no pueden editarse ni eliminarse. Si otra persona guarda una revisión mientras el odontograma está abierto, la API responde `409`; el borrador se conserva hasta que el profesional decida cargar la última versión.
+
 ## Consideraciones para producción
 
 Antes de desplegar el sistema:
@@ -289,4 +304,4 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10 y HU-13 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes permite registrar, buscar, abrir y editar expedientes, rechaza identificaciones duplicadas y además permite listar, crear, visualizar y editar consultas clínicas. Odontograma, documentos y citas continúan en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10 y HU-13 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes permite registrar, buscar, abrir y editar expedientes, rechaza identificaciones duplicadas, administra consultas clínicas y conserva odontogramas versionados por consulta. Documentos y citas continúan en historias posteriores.

@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from .identifiers import normalize_national_id
@@ -223,3 +224,60 @@ class Consultation(models.Model):
 
     def __str__(self):
         return f"{self.get_consultation_type_display()} · {self.patient} · {self.date}"
+
+
+class OdontogramVersion(models.Model):
+    class Dentition(models.TextChoices):
+        PRIMARY = "PRIMARY", "Temporal"
+        MIXED = "MIXED", "Mixta"
+        PERMANENT = "PERMANENT", "Permanente"
+
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.PROTECT,
+        related_name="odontogram_versions",
+    )
+    consultation = models.ForeignKey(
+        Consultation,
+        on_delete=models.PROTECT,
+        related_name="odontogram_versions",
+    )
+    version_number = models.PositiveIntegerField()
+    schema_version = models.PositiveSmallIntegerField(default=1, editable=False)
+    dentition = models.CharField(max_length=16, choices=Dentition.choices)
+    teeth = models.JSONField(default=dict)
+    changed_teeth = models.JSONField(default=list, editable=False)
+    note = models.TextField(blank=True)
+    based_on = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="derived_versions",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_odontogram_versions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-version_number",)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("patient", "version_number"),
+                name="unique_patient_odontogram_version",
+            ),
+        )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("Las versiones del odontograma son inmutables.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Las versiones del odontograma no se pueden eliminar.")
+
+    def __str__(self):
+        return f"Odontograma {self.patient} · versión {self.version_number}"

@@ -22,7 +22,7 @@ class PatientNationalIdKeyMigrationTests(TransactionTestCase):
 
     def tearDown(self):
         executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
+        executor.migrate([("patients", "0006_odontogramversion")])
         super().tearDown()
 
     def create_patient(self, national_id, email):
@@ -71,3 +71,66 @@ class PatientNationalIdKeyMigrationTests(TransactionTestCase):
         self.assertTrue(old_patient_model.objects.filter(pk=first.pk).exists())
         self.assertTrue(old_patient_model.objects.filter(pk=second.pk).exists())
         old_patient_model.objects.filter(pk=second.pk).delete()
+
+
+class OdontogramVersionMigrationTests(TransactionTestCase):
+    migrate_from = ("patients", "0005_patient_national_id_key")
+    migrate_to = ("patients", "0006_odontogramversion")
+
+    def setUp(self):
+        super().setUp()
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate([self.migrate_from])
+        old_apps = self.executor.loader.project_state([self.migrate_from]).apps
+        patient_model = old_apps.get_model("patients", "Patient")
+        consultation_model = old_apps.get_model("patients", "Consultation")
+        user = User.objects.create(
+            email="odontogram-migration@example.com",
+            password="!",
+            role="ODONTOLOGO",
+        )
+        patient = patient_model.objects.create(
+            first_name="Paciente",
+            last_name="Histórico",
+            birth_place="Managua",
+            national_id="001-090890-0001A",
+            national_id_key="0010908900001A",
+            gender="OTRO",
+            date_of_birth="1990-08-09",
+            registered_by_id=user.pk,
+        )
+        self.consultation_ids = [
+            consultation_model.objects.create(
+                patient_id=patient.pk,
+                professional_id=user.pk,
+                professional_name_snapshot="Odontólogo migración",
+                date=f"2026-08-{day:02d}",
+                time="09:00:00",
+                consultation_type="GENERAL",
+                summary=f"Consulta {day}",
+                status="COMPLETADA",
+            ).pk
+            for day in (8, 9)
+        ]
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate([self.migrate_to])
+        super().tearDown()
+
+    def test_migration_creates_an_empty_linked_version_for_each_consultation(self):
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate([self.migrate_to])
+        apps = self.executor.loader.project_state([self.migrate_to]).apps
+        version_model = apps.get_model("patients", "OdontogramVersion")
+        versions = list(version_model.objects.order_by("version_number"))
+
+        self.assertEqual(len(versions), 2)
+        self.assertEqual([item.version_number for item in versions], [1, 2])
+        self.assertEqual(
+            [item.consultation_id for item in versions],
+            self.consultation_ids,
+        )
+        self.assertEqual(versions[0].dentition, "PERMANENT")
+        self.assertEqual(versions[0].teeth, {})
+        self.assertIsNone(versions[0].based_on_id)
+        self.assertEqual(versions[1].based_on_id, versions[0].pk)
