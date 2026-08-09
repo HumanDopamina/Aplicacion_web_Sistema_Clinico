@@ -13,6 +13,7 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Administración de usuarios por parte del rol administrador.
 - Prevención de cuentas duplicadas mediante validación de correo.
 - Registro y búsqueda de pacientes con apertura automática de su expediente clínico completo.
+- Detección robusta de pacientes duplicados por identificación, ignorando guiones, espacios y mayúsculas sin alterar el formato visible.
 - Historial, creación, visualización y edición en línea de consultas clínicas por paciente.
 
 ## Tecnologías
@@ -261,8 +262,9 @@ La aplicación rechaza correos ya registrados, incluso si se escriben usando una
 
 1. Inicia sesión con una cuenta que tenga `patients.view` y `patients.create`.
 2. Selecciona **Nuevo paciente** desde el dashboard o desde **Pacientes**; ambas acciones abren `/pacientes/nuevo` usando la misma ficha visual que muestra un expediente existente.
-3. Completa los datos personales y antecedentes disponibles; al detectar cambios aparecerá la nube **Guardar cambios**.
-4. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
+3. Al guardar, la cédula se compara sin guiones, espacios ni diferencias de mayúsculas. Si ya existe, el formulario conserva el borrador y muestra **Ya existe un paciente con esta cédula.**
+4. Completa los datos personales y antecedentes disponibles; al detectar cambios aparecerá la nube **Guardar cambios**.
+5. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
 
 El **Resumen clínico** presenta los datos permanentes del paciente y sus antecedentes familiares, infectocontagiosos y hereditarios. Los datos variables de cada atención —anamnesis, examen físico, diagnóstico, plan, presupuesto y tratamiento— se registran exclusivamente en **Consultas**, evitando información duplicada.
 
@@ -287,4 +289,4 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09 y HU-10 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes permite registrar, buscar, abrir y editar expedientes, además de listar, crear, visualizar y editar consultas clínicas. Odontograma, documentos y citas continúan en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10 y HU-13 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes permite registrar, buscar, abrir y editar expedientes, rechaza identificaciones duplicadas y además permite listar, crear, visualizar y editar consultas clínicas. Odontograma, documentos y citas continúan en historias posteriores.

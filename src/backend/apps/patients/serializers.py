@@ -1,8 +1,9 @@
 from datetime import date
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
+from .identifiers import normalize_national_id
 from .models import ClinicalRecord, Consultation, Patient
 
 
@@ -62,7 +63,9 @@ class PatientSerializer(serializers.ModelSerializer):
 
     def validate_national_id(self, value):
         normalized = value.strip().upper()
-        matching_patients = Patient.objects.filter(national_id__iexact=normalized)
+        matching_patients = Patient.objects.filter(
+            national_id_key=normalize_national_id(normalized)
+        )
         if self.instance:
             matching_patients = matching_patients.exclude(pk=self.instance.pk)
         if matching_patients.exists():
@@ -72,23 +75,43 @@ class PatientSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         return value.strip().lower()
 
-    @transaction.atomic
     def create(self, validated_data):
         record_data = validated_data.pop("clinical_record", {})
-        patient = super().create(validated_data)
-        ClinicalRecord.objects.create(patient=patient, **record_data)
-        return patient
+        national_id = validated_data["national_id"]
+        try:
+            with transaction.atomic():
+                patient = super().create(validated_data)
+                ClinicalRecord.objects.create(patient=patient, **record_data)
+                return patient
+        except IntegrityError:
+            if Patient.objects.filter(
+                national_id_key=normalize_national_id(national_id)
+            ).exists():
+                raise serializers.ValidationError(
+                    {"national_id": ["Ya existe un paciente con esta cédula."]}
+                )
+            raise
 
-    @transaction.atomic
     def update(self, instance, validated_data):
         record_data = validated_data.pop("clinical_record", None)
-        patient = super().update(instance, validated_data)
-        if record_data is not None:
-            record, _ = ClinicalRecord.objects.get_or_create(patient=patient)
-            for field, value in record_data.items():
-                setattr(record, field, value)
-            record.save()
-        return patient
+        national_id = validated_data.get("national_id")
+        try:
+            with transaction.atomic():
+                patient = super().update(instance, validated_data)
+                if record_data is not None:
+                    record, _ = ClinicalRecord.objects.get_or_create(patient=patient)
+                    for field, value in record_data.items():
+                        setattr(record, field, value)
+                    record.save()
+                return patient
+        except IntegrityError:
+            if national_id and Patient.objects.filter(
+                national_id_key=normalize_national_id(national_id)
+            ).exclude(pk=instance.pk).exists():
+                raise serializers.ValidationError(
+                    {"national_id": ["Ya existe un paciente con esta cédula."]}
+                )
+            raise
 
 
 class ConsultationSerializer(serializers.ModelSerializer):

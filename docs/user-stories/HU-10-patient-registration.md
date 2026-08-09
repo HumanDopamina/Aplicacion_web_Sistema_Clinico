@@ -20,7 +20,7 @@
 - Los datos propios de una atención —profesional, fecha, motivo, anamnesis, interrogatorio, examen físico, diagnóstico, plan, presupuesto y tratamiento— se capturan exclusivamente desde **Consultas** y no se repiten en **Resumen clínico**.
 - **Resumen clínico** no muestra ni edita una tarjeta de archivos clínicos. Radiografías, fotografías y demás adjuntos se gestionarán exclusivamente desde la pestaña **Documentos**.
 - Son obligatorios: nombres, primer apellido, lugar de nacimiento, cédula, género y fecha de nacimiento.
-- La API rechaza fechas futuras y cédulas duplicadas sin distinguir mayúsculas/minúsculas.
+- La API rechaza fechas futuras. La detección robusta de cédulas duplicadas, incluyendo variantes de guiones y espacios, se documenta en HU-13.
 - El sistema genera el código inmutable `PAC-00001` a partir del identificador interno.
 - Después de guardar, la interfaz navega a `/pacientes/{id}` y muestra el expediente inicial.
 - El expediente de lectura conserva el diseño de tarjetas para datos personales y antecedentes; los opcionales vacíos se identifican como **Sin información registrada**.

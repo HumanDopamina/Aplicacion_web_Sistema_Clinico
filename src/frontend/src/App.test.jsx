@@ -602,6 +602,31 @@ describe('authenticated routes', () => {
     expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeInTheDocument()
   })
 
+  it('[HU-13] shows the duplicate identification error without losing the new patient draft', async () => {
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/') && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({
+          national_id: ['Ya existe un paciente con esta cédula.'],
+        }, 400))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    const { router } = renderAuthenticated('RECEPCIONISTA', false, '/pacientes/nuevo')
+
+    fireEvent.change(screen.getByLabelText('Nombres'), { target: { value: 'María Fernanda' } })
+    fireEvent.change(screen.getByLabelText('Primer apellido'), { target: { value: 'García' } })
+    fireEvent.change(screen.getByLabelText('Lugar de nacimiento'), { target: { value: 'Managua' } })
+    fireEvent.change(screen.getByLabelText('Cédula'), { target: { value: '0011604980001a' } })
+    fireEvent.change(screen.getByLabelText('Género'), { target: { value: 'FEMENINO' } })
+    fireEvent.change(screen.getByLabelText('Fecha de nacimiento'), { target: { value: '1998-04-16' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ya existe un paciente con esta cédula.')
+    expect(screen.getByLabelText('Cédula')).toHaveValue('0011604980001a')
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/pacientes/nuevo')
+  })
+
   it('[HU-10] warns before leaving a dirty patient record', async () => {
     vi.stubGlobal('fetch', vi.fn((url) => {
       if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))

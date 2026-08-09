@@ -1,7 +1,12 @@
+from unittest.mock import patch
+
 from django.apps import apps
+from django.db import IntegrityError, transaction
 from rest_framework.test import APITestCase
 
 from apps.users.models import RolePermissionPreset, User
+
+from .models import Patient
 
 
 class PatientApiTests(APITestCase):
@@ -188,6 +193,100 @@ class PatientApiTests(APITestCase):
         self.assertEqual(created.status_code, 201)
         self.assertEqual(duplicate.status_code, 400)
         self.assertIn("national_id", duplicate.data)
+
+    def test_hu13_rejects_duplicate_national_id_with_different_separators(self):
+        self.client.force_authenticate(self.receptionist)
+        created = self.client.post(self.list_url, self.payload(), format="json")
+
+        duplicate = self.client.post(
+            self.list_url,
+            self.payload(
+                national_id=" 001 160498 0001a ",
+                email="duplicado@example.com",
+            ),
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(
+            duplicate.data,
+            {"national_id": ["Ya existe un paciente con esta cédula."]},
+        )
+        self.assertEqual(Patient.objects.count(), 1)
+
+    def test_hu13_allows_reformatting_the_same_patients_national_id(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(self.list_url, self.payload(), format="json")
+
+        response = self.client.patch(
+            f"{self.list_url}{created.data['id']}/",
+            {"national_id": " 001 160498 0001a "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["national_id"], "001 160498 0001A")
+        self.assertNotIn("national_id_key", response.data)
+        patient = Patient.objects.get(pk=created.data["id"])
+        self.assertEqual(patient.national_id_key, "0011604980001A")
+
+    def test_hu13_allows_a_genuinely_distinct_national_id(self):
+        self.client.force_authenticate(self.receptionist)
+        first = self.client.post(self.list_url, self.payload(), format="json")
+        second = self.client.post(
+            self.list_url,
+            self.payload(
+                national_id="001-160498-0002A",
+                email="distinto@example.com",
+            ),
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(Patient.objects.count(), 2)
+
+    def test_hu13_model_enforces_the_normalized_key_for_direct_saves(self):
+        Patient.objects.create(
+            registered_by=self.admin,
+            **self.payload(),
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Patient.objects.create(
+                registered_by=self.admin,
+                **self.payload(
+                    national_id="0011604980001a",
+                    email="directo@example.com",
+                ),
+            )
+
+        self.assertEqual(Patient.objects.count(), 1)
+
+    def test_hu13_translates_a_concurrent_duplicate_conflict(self):
+        self.client.force_authenticate(self.admin)
+        self.client.post(self.list_url, self.payload(), format="json")
+
+        with patch(
+            "django.db.models.query.QuerySet.exists",
+            side_effect=[False, True],
+        ):
+            response = self.client.post(
+                self.list_url,
+                self.payload(
+                    national_id="0011604980001a",
+                    email="concurrente@example.com",
+                ),
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data,
+            {"national_id": ["Ya existe un paciente con esta cédula."]},
+        )
+        self.assertEqual(Patient.objects.count(), 1)
 
     def test_hu10_read_only_fields_cannot_be_impersonated(self):
         self.client.force_authenticate(self.receptionist)

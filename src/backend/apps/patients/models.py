@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.db import models
 
+from .identifiers import normalize_national_id
+
 
 class Patient(models.Model):
     class Gender(models.TextChoices):
@@ -22,7 +24,8 @@ class Patient(models.Model):
     mother_name = models.CharField(max_length=200, blank=True)
     information_source = models.CharField(max_length=150, blank=True)
     information_reliability = models.CharField(max_length=100, blank=True)
-    national_id = models.CharField(max_length=32, unique=True)
+    national_id = models.CharField(max_length=32)
+    national_id_key = models.CharField(max_length=32, unique=True, editable=False)
     phone = models.CharField(max_length=32, blank=True)
     email = models.EmailField(blank=True)
     emergency_contact_name = models.CharField(max_length=150, blank=True)
@@ -50,6 +53,10 @@ class Patient(models.Model):
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
+        self.national_id_key = normalize_national_id(self.national_id)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "national_id" in update_fields:
+            kwargs["update_fields"] = set(update_fields) | {"national_id_key"}
         super().save(*args, **kwargs)
         if is_new and not self.code:
             self.code = f"PAC-{self.pk:05d}"
