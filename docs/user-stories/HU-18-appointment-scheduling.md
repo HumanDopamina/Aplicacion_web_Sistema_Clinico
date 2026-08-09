@@ -13,6 +13,7 @@
 ## Alcance implementado
 
 - La agenda ofrece vistas diaria, semanal y mensual. La vista diaria organiza por hora y odontólogo; semana muestra siete columnas y mes resume la ocupación por fecha, con acceso directo al detalle diario.
+- La creación, edición y consulta de una cita se presentan en modales centrados, con scroll interno y adaptación de pantalla completa en móvil.
 - Semana y mes se consultan como rangos inclusivos en una sola petición y mantienen desplazamiento horizontal accesible en pantallas estrechas.
 - El dashboard consulta la fecha local actual, muestra el total y el resumen de las citas del día, y enlaza con la agenda completa.
 - Recepción y administración pueden programar citas indicando paciente, odontólogo, fecha, hora, duración, motivo y notas.

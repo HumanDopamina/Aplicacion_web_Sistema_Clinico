@@ -20,7 +20,7 @@
 - [x] Add backend model, migrations, permissions, REST endpoints and availability rules.
 - [x] Cover creation, conflicts, filters, permissions and lifecycle transitions with API tests.
 - [x] Add the appointment API service and its contract tests.
-- [x] Build the accessible daily agenda, responsive timeline and reusable side panels.
+- [x] Build the accessible daily agenda, responsive timeline and reusable centered modals.
 - [x] Add weekly and monthly calendar views backed by inclusive range queries and daily drill-down.
 - [x] Cover page states, navigation, permissions, creation, conflicts and transitions.
 - [x] Document HU-18 and update the implemented-story summary.

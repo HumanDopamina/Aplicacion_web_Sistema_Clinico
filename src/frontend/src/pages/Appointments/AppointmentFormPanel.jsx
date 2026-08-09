@@ -94,8 +94,8 @@ export default function AppointmentFormPanel({
     }
   }
 
-  return <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 backdrop-blur-[2px]">
-    <section role="dialog" aria-modal="true" aria-labelledby="appointment-form-title" className="h-full w-full max-w-xl overflow-y-auto bg-white shadow-2xl">
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-0 backdrop-blur-[2px] sm:p-5">
+    <section role="dialog" aria-modal="true" aria-labelledby="appointment-form-title" className="h-full w-full overflow-y-auto bg-white shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-2.5rem)] sm:max-w-3xl sm:rounded-2xl">
       <header className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-200 bg-white/95 px-6 py-5 backdrop-blur">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-700">Agenda clínica</p>

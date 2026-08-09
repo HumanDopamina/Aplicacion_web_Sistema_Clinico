@@ -43,9 +43,9 @@ export default function AppointmentDetailsPanel({ appointment, canEdit, onClose,
   const confirmed = appointment.status === 'CONFIRMADA'
   const editable = canEdit && (scheduled || confirmed)
 
-  return <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 backdrop-blur-[2px]">
-    <section role="dialog" aria-modal="true" aria-label="Detalle de cita" className="h-full w-full max-w-lg overflow-y-auto bg-white shadow-2xl">
-      <header className="flex items-start justify-between border-b border-slate-200 px-6 py-5">
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-0 backdrop-blur-[2px] sm:p-5">
+    <section role="dialog" aria-modal="true" aria-label="Detalle de cita" className="h-full w-full overflow-y-auto bg-white shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-2.5rem)] sm:max-w-2xl sm:rounded-2xl">
+      <header className="sticky top-0 z-10 flex items-start justify-between border-b border-slate-200 bg-white/95 px-6 py-5 backdrop-blur">
         <div><p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-700">Detalle de cita</p><h2 ref={titleRef} tabIndex="-1" id="appointment-detail-title" className="mt-1 font-serif text-3xl font-semibold text-slate-900 outline-none">{appointment.patient_name}</h2></div>
         <button type="button" onClick={onClose} aria-label="Cerrar detalle" className="grid h-10 w-10 place-items-center rounded-full text-xl text-slate-500 hover:bg-slate-100">×</button>
       </header>
