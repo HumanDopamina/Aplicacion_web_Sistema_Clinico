@@ -177,6 +177,23 @@ class AppointmentApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["id"] for item in response.data], [expected.pk])
 
+    def test_list_filters_an_inclusive_date_range_for_calendar_views(self):
+        first = self.create_appointment(date=date(2026, 8, 10))
+        second = self.create_appointment(
+            patient=self.other_patient,
+            dentist=self.other_dentist,
+            date=date(2026, 8, 16),
+        )
+        self.create_appointment(date=date(2026, 8, 17))
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.get(
+            f"{self.list_url}?date_from=2026-08-10&date_to=2026-08-16",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [first.pk, second.pk])
+
     def test_availability_returns_only_active_non_overlapping_dentists(self):
         self.create_appointment()
         User.objects.create_user(

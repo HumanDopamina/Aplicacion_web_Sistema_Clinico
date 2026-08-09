@@ -27,10 +27,17 @@ class AppointmentListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         queryset = Appointment.objects.select_related("patient", "dentist", "created_by")
         appointment_date = self.request.query_params.get("date")
+        date_from = self.request.query_params.get("date_from")
+        date_to = self.request.query_params.get("date_to")
         dentist = self.request.query_params.get("dentist")
         appointment_status = self.request.query_params.get("status")
         if appointment_date:
             queryset = queryset.filter(date=appointment_date)
+        else:
+            if date_from:
+                queryset = queryset.filter(date__gte=date_from)
+            if date_to:
+                queryset = queryset.filter(date__lte=date_to)
         if dentist:
             queryset = queryset.filter(dentist_id=dentist)
         if appointment_status:

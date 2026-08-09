@@ -17,6 +17,19 @@ const localDate = () => {
   return new Date(now.getTime() - offset).toISOString().slice(0, 10)
 }
 
+const datePlus = (days) => {
+  const value = new Date(`${localDate()}T12:00:00`)
+  value.setDate(value.getDate() + days)
+  return value.toISOString().slice(0, 10)
+}
+
+const weekStart = () => {
+  const value = new Date(`${localDate()}T12:00:00`)
+  const weekday = value.getDay()
+  value.setDate(value.getDate() + (weekday === 0 ? -6 : 1 - weekday))
+  return value.toISOString().slice(0, 10)
+}
+
 const patient = {
   id: 1, code: 'PAC-00001', full_name: 'Ana Pérez', first_name: 'Ana', last_name: 'Pérez',
   phone: '8888-1111', is_active: true,
@@ -107,6 +120,63 @@ describe('AppointmentsPage', () => {
       </AuthContext.Provider>,
     )
     expect(screen.queryByRole('button', { name: 'Nueva cita' })).not.toBeInTheDocument()
+  })
+
+  it('switches to a seven-day agenda and opens one day from the week', async () => {
+    appointmentService.listAppointments.mockResolvedValue([
+      appointment(),
+      appointment({
+        id: 10,
+        patient: 2,
+        patient_name: 'Luis Mendoza',
+        patient_code: 'PAC-00002',
+        date: weekStart(),
+        start_time: '11:00:00',
+        end_time: '11:45:00',
+        duration_minutes: 45,
+        reason: 'Control preventivo',
+      }),
+    ])
+    renderPage()
+    await screen.findByText('Valoración de ortodoncia')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Semana' }))
+
+    const week = await screen.findByRole('region', { name: 'Vista semanal' })
+    expect(within(week).getByText('Ana Pérez')).toBeInTheDocument()
+    expect(within(week).getByText('Luis Mendoza')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Semana' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(within(week).getAllByRole('button', { name: /Abrir agenda del/ })[0])
+    expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByLabelText('Fecha de agenda')).toHaveValue(weekStart())
+  })
+
+  it('shows a monthly calendar and drills into a day with appointments', async () => {
+    appointmentService.listAppointments.mockResolvedValue([
+      appointment(),
+      appointment({
+        id: 10,
+        patient_name: 'Luis Mendoza',
+        date: datePlus(1),
+        start_time: '11:00:00',
+        end_time: '11:45:00',
+        duration_minutes: 45,
+      }),
+    ])
+    renderPage()
+    await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mes' }))
+
+    const month = await screen.findByRole('region', { name: 'Vista mensual' })
+    expect(within(month).getByText('Lun')).toBeInTheDocument()
+    expect(within(month).getByText('Dom')).toBeInTheDocument()
+    expect(within(month).getByText('Ana Pérez')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mes' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(within(month).getAllByRole('button', { name: /Abrir agenda del/ })[0])
+    expect(screen.getByRole('button', { name: 'Día' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('creates an appointment from the accessible side panel', async () => {

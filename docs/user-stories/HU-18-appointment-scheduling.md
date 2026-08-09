@@ -12,7 +12,8 @@
 
 ## Alcance implementado
 
-- La agenda diaria presenta las citas por hora y odontólogo, con una lista cronológica adaptable a móvil.
+- La agenda ofrece vistas diaria, semanal y mensual. La vista diaria organiza por hora y odontólogo; semana muestra siete columnas y mes resume la ocupación por fecha, con acceso directo al detalle diario.
+- Semana y mes se consultan como rangos inclusivos en una sola petición y mantienen desplazamiento horizontal accesible en pantallas estrechas.
 - Recepción y administración pueden programar citas indicando paciente, odontólogo, fecha, hora, duración, motivo y notas.
 - Las duraciones disponibles son 30, 45, 60 y 90 minutos.
 - El selector profesional devuelve únicamente odontólogos activos disponibles para el intervalo elegido.
@@ -31,9 +32,9 @@
 ## Evidencia de aceptación
 
 - Las pruebas backend cubren autorización, referencias activas, filtros, disponibilidad, solapamientos, citas adyacentes y transiciones.
-- Las pruebas frontend cubren agenda, navegación por fecha, permisos, creación, errores conservando el formulario y confirmación.
+- Las pruebas frontend cubren agenda, navegación diaria/semanal/mensual, apertura de un día desde calendarios agregados, permisos, creación, errores conservando el formulario y confirmación.
 - La interfaz ofrece estados de carga, error y vacío, foco visible, paneles accesibles y diseño responsive sin dependencias externas de calendario.
-- Evidencia visual: [agenda de escritorio](assets/HU-18-desktop.png) y [agenda móvil](assets/HU-18-mobile.png).
+- Evidencia visual: [agenda diaria de escritorio](assets/HU-18-desktop.png), [agenda diaria móvil](assets/HU-18-mobile.png), [vista semanal](assets/HU-18-week.png), [vista mensual](assets/HU-18-month.png) y [vista semanal móvil](assets/HU-18-week-mobile.png).
 
 ## Verificación
 

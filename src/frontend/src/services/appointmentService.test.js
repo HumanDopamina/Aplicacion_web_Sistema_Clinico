@@ -22,6 +22,15 @@ describe('appointmentService', () => {
     )
   })
 
+  it('lists an inclusive range for week and month calendars', () => {
+    listAppointments('token', { date_from: '2026-08-10', date_to: '2026-08-16' })
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      '/api/appointments/?date_from=2026-08-10&date_to=2026-08-16',
+      { headers: { Authorization: 'Bearer token' } },
+    )
+  })
+
   it('creates and updates appointments with authentication', () => {
     const appointment = { patient: 2, dentist: 3, date: '2026-08-12' }
     createAppointment('token', appointment)

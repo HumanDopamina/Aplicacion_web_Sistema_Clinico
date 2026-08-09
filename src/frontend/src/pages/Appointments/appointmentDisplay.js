@@ -14,6 +14,69 @@ export const shiftDate = (value, days) => {
   return date.toISOString().slice(0, 10)
 }
 
+export const startOfWeek = (value) => {
+  const date = new Date(`${value}T12:00:00`)
+  const weekday = date.getDay()
+  date.setDate(date.getDate() + (weekday === 0 ? -6 : 1 - weekday))
+  return date.toISOString().slice(0, 10)
+}
+
+export const shiftMonth = (value, months) => {
+  const date = new Date(`${value}T12:00:00`)
+  const day = date.getDate()
+  date.setDate(1)
+  date.setMonth(date.getMonth() + months)
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+  date.setDate(Math.min(day, lastDay))
+  return date.toISOString().slice(0, 10)
+}
+
+export const calendarRange = (view, value) => {
+  if (view === 'day') return { date: value }
+  if (view === 'week') {
+    const dateFrom = startOfWeek(value)
+    return { date_from: dateFrom, date_to: shiftDate(dateFrom, 6) }
+  }
+  const date = new Date(`${value}T12:00:00`)
+  const dateFrom = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
+  const dateTo = new Date(date.getFullYear(), date.getMonth() + 1, 0, 12).toISOString().slice(0, 10)
+  return { date_from: dateFrom, date_to: dateTo }
+}
+
+export const dateBelongsToView = (date, view, selectedDate) => {
+  const range = calendarRange(view, selectedDate)
+  return range.date ? date === range.date : date >= range.date_from && date <= range.date_to
+}
+
+export const calendarTitle = (view, value) => {
+  if (view === 'day') return formatLongDate(value)
+  if (view === 'month') {
+    const formatted = new Intl.DateTimeFormat('es-NI', {
+      month: 'long', year: 'numeric', timeZone: 'UTC',
+    }).format(new Date(`${value}T12:00:00Z`))
+    return `${formatted.charAt(0).toUpperCase()}${formatted.slice(1)}`
+  }
+  const from = startOfWeek(value)
+  const to = shiftDate(from, 6)
+  const fromDate = new Date(`${from}T12:00:00Z`)
+  const toDate = new Date(`${to}T12:00:00Z`)
+  const sameMonth = fromDate.getUTCMonth() === toDate.getUTCMonth()
+    && fromDate.getUTCFullYear() === toDate.getUTCFullYear()
+  const first = new Intl.DateTimeFormat('es-NI', sameMonth
+    ? { day: 'numeric', timeZone: 'UTC' }
+    : { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(fromDate)
+  const last = new Intl.DateTimeFormat('es-NI', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+  }).format(toDate)
+  return `Semana del ${first} al ${last}`
+}
+
+export const monthCalendarDays = (value) => {
+  const range = calendarRange('month', value)
+  const firstGridDay = startOfWeek(range.date_from)
+  return Array.from({ length: 42 }, (_, index) => shiftDate(firstGridDay, index))
+}
+
 export const formatClock = (value) => clockFormatter.format(new Date(`2000-01-01T${value}Z`))
 
 export const formatLongDate = (value) => {
