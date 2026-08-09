@@ -13,6 +13,8 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Administración de usuarios por parte del rol administrador.
 - Prevención de cuentas duplicadas mediante validación de correo.
 - Registro y búsqueda de pacientes con apertura automática de su expediente clínico completo.
+- Detección robusta de pacientes duplicados por identificación, ignorando guiones, espacios y mayúsculas sin alterar el formato visible.
+- Historial, creación, visualización y edición en línea de consultas clínicas por paciente.
 
 ## Tecnologías
 
@@ -195,6 +197,10 @@ Los enlaces de recuperación:
 | `POST` | `/api/patients/` | `patients.create` | Registra un paciente, genera su código y crea `clinical_record`. |
 | `GET` | `/api/patients/{id}/` | `patients.view` | Abre la identidad y el expediente clínico completo. |
 | `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza datos personales y el expediente clínico anidado. |
+| `GET` | `/api/patients/{id}/consultations/` | `consultations.view` | Lista las consultas del paciente por fecha descendente. |
+| `POST` | `/api/patients/{id}/consultations/` | `consultations.create` | Registra una consulta y asigna el profesional autenticado. |
+| `GET` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.view` | Abre la ficha clínica completa de la consulta. |
+| `PATCH` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.edit` | Actualiza la consulta sin cambiar paciente o profesional. |
 
 ## Pruebas y validación
 
@@ -256,12 +262,17 @@ La aplicación rechaza correos ya registrados, incluso si se escriben usando una
 
 1. Inicia sesión con una cuenta que tenga `patients.view` y `patients.create`.
 2. Selecciona **Nuevo paciente** desde el dashboard o desde **Pacientes**; ambas acciones abren `/pacientes/nuevo` usando la misma ficha visual que muestra un expediente existente.
-3. Completa la identidad y las secciones clínicas disponibles; al detectar cambios aparecerá la nube **Guardar cambios**.
-4. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
+3. Al guardar, la cédula se compara sin guiones, espacios ni diferencias de mayúsculas. Si ya existe, el formulario conserva el borrador y muestra **Ya existe un paciente con esta cédula.**
+4. Completa los datos personales y antecedentes disponibles; al detectar cambios aparecerá la nube **Guardar cambios**.
+5. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
 
-El expediente presenta datos de consulta, información personal, anamnesis, antecedentes, examen físico, diagnóstico, plan, presupuesto, tratamiento y referencias clínicas. Los valores opcionales no capturados se muestran vacíos de forma explícita, sin inventar información médica.
+El **Resumen clínico** presenta los datos permanentes del paciente y sus antecedentes familiares, infectocontagiosos y hereditarios. Los datos variables de cada atención —anamnesis, examen físico, diagnóstico, plan, presupuesto y tratamiento— se registran exclusivamente en **Consultas**, evitando información duplicada.
 
 Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso, los campos de las mismas tarjetas son editables directamente y conservan apariencia de texto hasta recibir foco. La nube **Guardar cambios** y la X **Descartar cambios** aparecen únicamente cuando el borrador difiere de la última versión guardada; la aplicación advierte antes de abandonar cambios pendientes.
+
+La pestaña **Consultas** muestra el historial clínico persistido del paciente en orden descendente por fecha. Cada registro identifica el tipo, profesional, resumen y estado. **Nueva consulta** abre una ficha completa con el mismo comportamiento de edición directa: fecha/hora actuales y estado **En progreso**, nube para guardar, X para descartar y advertencia al abandonar cambios pendientes.
+
+El administrador gestiona `consultations.view`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
 
 ## Consideraciones para producción
 
@@ -278,4 +289,4 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09 y HU-10 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes ya permite registrar, buscar y abrir expedientes base; las funciones clínicas avanzadas, clínicas y citas continúan en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10 y HU-13 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El módulo de pacientes permite registrar, buscar, abrir y editar expedientes, rechaza identificaciones duplicadas y además permite listar, crear, visualizar y editar consultas clínicas. Odontograma, documentos y citas continúan en historias posteriores.

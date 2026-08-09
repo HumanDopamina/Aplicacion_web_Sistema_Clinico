@@ -8,6 +8,8 @@ import ChangePasswordPage from './pages/Auth/ChangePasswordPage'
 import SettingsPage from './pages/Settings/SettingsPage'
 import PatientsPage from './pages/Patients/PatientsPage'
 import PatientRecordPage from './pages/Patients/PatientRecordPage'
+import PatientConsultationsPage from './pages/Patients/PatientConsultationsPage'
+import ConsultationRecordPage from './pages/Patients/ConsultationRecordPage'
 import Navbar from './components/Navbar'
 import Sidebar from './components/Sidebar'
 
@@ -45,6 +47,9 @@ export default function App() {
     <Route path="/usuarios" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Usuarios" /></ProtectedLayout>} />
     <Route path="/pacientes" element={<ProtectedLayout requiredPermission="patients.view"><PatientsPage /></ProtectedLayout>} />
     <Route path="/pacientes/nuevo" element={<ProtectedLayout requiredPermission="patients.create"><PatientRecordPage isNew /></ProtectedLayout>} />
+    <Route path="/pacientes/:patientId/consultas/nueva" element={<ProtectedLayout requiredPermission="consultations.create"><ConsultationRecordPage isNew /></ProtectedLayout>} />
+    <Route path="/pacientes/:patientId/consultas/:consultationId" element={<ProtectedLayout requiredPermission="consultations.view"><ConsultationRecordPage /></ProtectedLayout>} />
+    <Route path="/pacientes/:patientId/consultas" element={<ProtectedLayout requiredPermission="consultations.view"><PatientConsultationsPage /></ProtectedLayout>} />
     <Route path="/pacientes/:id" element={<ProtectedLayout requiredPermission="patients.view"><PatientRecordPage /></ProtectedLayout>} />
     <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Clínicas" /></ProtectedLayout>} />
     <Route path="/citas" element={<ProtectedLayout><ModulePage title="Citas" /></ProtectedLayout>} />
