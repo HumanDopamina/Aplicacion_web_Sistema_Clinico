@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Preserve the current patient summary fields without synchronization or removal.
+- Preserve legacy consultation values in `ClinicalRecord`, but keep consultation-specific fields out of the patient summary UI and payload.
 - Assign the patient and professional only from the URL and authenticated request.
 - Keep consultation deletion unavailable.
 - Keep the existing visual language and responsive patient record layout.
@@ -115,3 +115,15 @@
 - [x] Run `npm test -- --run`, `npm run lint`, and `npm run build` from `src/frontend`.
 - [x] Validate desktop and mobile flows in Chromium with no overflow or console errors.
 - [x] Review the diff and commit as `feat: add inline patient consultation records`.
+
+### Task 7: Remove duplicated consultation fields from the patient summary
+
+**Files:**
+- Modify: `src/frontend/src/pages/Patients/PatientRecordPage.jsx`
+- Modify: `src/frontend/src/pages/Patients/patientRecordSchema.js`
+- Test: `src/frontend/src/App.test.jsx`
+
+- [x] Add regressions proving that consultation sections are absent from **Resumen clínico** and excluded from patient `POST/PATCH` payloads.
+- [x] Keep patient identity, contact, family history, and structured disease antecedents editable in the summary.
+- [x] Remove consultation metadata, anamnesis, systems review, physical examination, diagnosis, plan, budget, and treatment cards from the summary.
+- [x] Leave backend fields and stored legacy values intact; no destructive migration or automatic synchronization is introduced.

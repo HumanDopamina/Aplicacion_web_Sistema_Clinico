@@ -261,10 +261,10 @@ La aplicación rechaza correos ya registrados, incluso si se escriben usando una
 
 1. Inicia sesión con una cuenta que tenga `patients.view` y `patients.create`.
 2. Selecciona **Nuevo paciente** desde el dashboard o desde **Pacientes**; ambas acciones abren `/pacientes/nuevo` usando la misma ficha visual que muestra un expediente existente.
-3. Completa la identidad y las secciones clínicas disponibles; al detectar cambios aparecerá la nube **Guardar cambios**.
+3. Completa los datos personales y antecedentes disponibles; al detectar cambios aparecerá la nube **Guardar cambios**.
 4. El sistema genera un código `PAC-00001` y abre automáticamente el expediente inicial.
 
-El expediente presenta datos de consulta, información personal, anamnesis, antecedentes, examen físico, diagnóstico, plan, presupuesto, tratamiento y referencias clínicas. Los valores opcionales no capturados se muestran vacíos de forma explícita, sin inventar información médica.
+El **Resumen clínico** presenta los datos permanentes del paciente y sus antecedentes familiares, infectocontagiosos y hereditarios. Los datos variables de cada atención —anamnesis, examen físico, diagnóstico, plan, presupuesto y tratamiento— se registran exclusivamente en **Consultas**, evitando información duplicada.
 
 Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso, los campos de las mismas tarjetas son editables directamente y conservan apariencia de texto hasta recibir foco. La nube **Guardar cambios** y la X **Descartar cambios** aparecen únicamente cuando el borrador difiere de la última versión guardada; la aplicación advierte antes de abandonar cambios pendientes.
 

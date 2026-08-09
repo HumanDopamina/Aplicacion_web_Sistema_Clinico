@@ -257,9 +257,11 @@ describe('authenticated routes', () => {
     expect(screen.getByText('Consultas')).toBeInTheDocument()
     expect(screen.getByText('Odontograma')).toBeInTheDocument()
     expect(screen.getByText('Documentos')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Datos generales de la consulta' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Interrogatorio por aparatos y sistemas' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Examen físico' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Datos personales' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Antecedentes familiares patológicos' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Datos generales de la consulta' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Interrogatorio por aparatos y sistemas' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Examen físico' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Archivos clínicos' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Descartar cambios' })).not.toBeInTheDocument()
@@ -272,48 +274,45 @@ describe('authenticated routes', () => {
     fireEvent.change(screen.getByLabelText('Cédula'), { target: { value: '001-160498-0001A' } })
     fireEvent.change(screen.getByLabelText('Género'), { target: { value: 'FEMENINO' } })
     fireEvent.change(screen.getByLabelText('Fecha de nacimiento'), { target: { value: '1998-04-16' } })
-    fireEvent.change(screen.getByLabelText('Doctor que examina'), { target: { value: 'Dra. Elena Ruiz' } })
-    fireEvent.change(screen.getByLabelText('Motivo de consulta'), { target: { value: 'Dolor en molar inferior derecho.' } })
-    fireEvent.change(screen.getByLabelText('Respiratorio'), { target: { value: 'Sin disnea.' } })
     fireEvent.change(screen.getByLabelText('Antecedentes familiares'), { target: { value: 'Madre con hipertensión arterial.' } })
-    fireEvent.change(screen.getByLabelText('Presión arterial'), { target: { value: '118/76' } })
-    fireEvent.change(screen.getByLabelText('Aspecto general'), { target: { value: 'Consciente y orientada.' } })
-    fireEvent.change(screen.getByLabelText('Diagnóstico / problemas odontológicos'), { target: { value: 'Pulpitis irreversible en pieza 46.' } })
-    fireEvent.change(screen.getByLabelText('Plan de tratamiento'), { target: { value: 'Tratamiento endodóntico y corona.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
 
     expect(await screen.findByRole('heading', { name: 'María Fernanda García López' })).toBeInTheDocument()
     expect(screen.getByText('PAC-00001')).toBeInTheDocument()
-    expect(submittedPatient.clinical_record.examiner_name).toBe('Dra. Elena Ruiz')
-    expect(submittedPatient.clinical_record.chief_complaint).toBe('Dolor en molar inferior derecho.')
-    expect(submittedPatient.clinical_record.blood_pressure).toBe('118/76')
-    expect(submittedPatient.clinical_record.consultation_date).toBeNull()
-    expect(submittedPatient.clinical_record.consultation_time).toBeNull()
+    expect(submittedPatient.clinical_record.family_history).toBe('Madre con hipertensión arterial.')
+    expect(Object.keys(submittedPatient.clinical_record).sort()).toEqual([
+      'clinical_photographs',
+      'family_history',
+      'hereditary_diseases',
+      'infectious_diseases',
+      'radiographic_exams',
+    ])
   })
 
-  it('[HU-10] displays the complete clinical record fields', async () => {
+  it('[HU-10] keeps consultation-specific fields out of the clinical summary', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(patientFixture)))
     renderAuthenticated('ODONTOLOGO', false, '/pacientes/1')
 
     expect(await screen.findByRole('heading', { name: 'María Fernanda García López' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Datos generales de la consulta' })).toBeInTheDocument()
-    expect(screen.getByText('Dra. Elena Ruiz')).toBeInTheDocument()
-    expect(screen.getByText('INSS-9081')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Datos personales' })).toBeInTheDocument()
     expect(screen.getByText('Docente')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Motivo de consulta' })).toBeInTheDocument()
-    expect(screen.getByText('Dolor en molar inferior derecho.')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Interrogatorio por aparatos y sistemas' })).toBeInTheDocument()
-    expect(screen.getByText('Sin dolor precordial.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Antecedentes familiares patológicos' })).toBeInTheDocument()
     expect(screen.getByText('Varicela')).toBeInTheDocument()
     expect(screen.getByText('Diabetes mellitus')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Examen físico' })).toBeInTheDocument()
-    expect(screen.getByText('118/76')).toBeInTheDocument()
-    expect(screen.getByText('Consciente y orientada.')).toBeInTheDocument()
-    expect(screen.getByText('Paciente apta para tratamiento.')).toBeInTheDocument()
-    expect(screen.getByText('Pulpitis irreversible en pieza 46.')).toBeInTheDocument()
-    expect(screen.getByText('Tratamiento endodóntico y corona.')).toBeInTheDocument()
-    expect(screen.getByText('C$ 10,500.')).toBeInTheDocument()
-    expect(screen.getByText('Radiografía periapical diagnóstica.')).toBeInTheDocument()
+    for (const heading of [
+      'Datos generales de la consulta',
+      'Motivo de consulta',
+      'Historia de la enfermedad actual',
+      'Interrogatorio por aparatos y sistemas',
+      'Examen físico',
+      'Observaciones y análisis',
+      'Diagnósticos o problemas odontológicos',
+      'Plan de tratamiento odontológico',
+      'Presupuesto',
+      'Tratamiento realizado',
+    ]) {
+      expect(screen.queryByRole('heading', { name: heading })).not.toBeInTheDocument()
+    }
   })
 
   it('[HU-10] reserves clinical files for the Documents tab', async () => {
@@ -550,14 +549,13 @@ describe('authenticated routes', () => {
 
     fireEvent.change(screen.getByLabelText('Dirección habitual'), { target: { value: 'Residencial Las Colinas' } })
     fireEvent.change(screen.getByLabelText('Teléfono de emergencia'), { target: { value: '+505 7777 3333' } })
-    fireEvent.change(screen.getByLabelText('Motivo de consulta'), { target: { value: 'Control posterior al tratamiento.' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument())
     expect(screen.getByLabelText('Dirección habitual')).toHaveValue('Residencial Las Colinas')
     expect(screen.getByLabelText('Teléfono de emergencia')).toHaveValue('+505 7777 3333')
-    expect(screen.getByLabelText('Motivo de consulta')).toHaveValue('Control posterior al tratamiento.')
-    expect(submittedChanges.clinical_record.chief_complaint).toBe('Control posterior al tratamiento.')
+    expect(submittedChanges.clinical_record).not.toHaveProperty('chief_complaint')
+    expect(submittedChanges.clinical_record).not.toHaveProperty('blood_pressure')
   })
 
   it('[HU-10] keeps the patient record read-only without the configured permission', async () => {
