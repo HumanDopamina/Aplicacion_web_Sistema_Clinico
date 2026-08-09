@@ -4,7 +4,12 @@ from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
 from .identifiers import normalize_national_id
-from .models import ClinicalRecord, Consultation, Patient
+from .models import ClinicalRecord, Consultation, OdontogramVersion, Patient
+from .odontograms import (
+    create_initial_odontogram_version,
+    create_odontogram_revision,
+    normalize_teeth_snapshot,
+)
 
 
 class ClinicalRecordSerializer(serializers.ModelSerializer):
@@ -153,3 +158,84 @@ class ConsultationSerializer(serializers.ModelSerializer):
             "summary": {"required": True, "allow_blank": False},
             "status": {"required": True},
         }
+
+    def create(self, validated_data):
+        with transaction.atomic():
+            consultation = super().create(validated_data)
+            create_initial_odontogram_version(consultation)
+            return consultation
+
+
+class OdontogramVersionSerializer(serializers.ModelSerializer):
+    professional_name = serializers.SerializerMethodField()
+    consultation_date = serializers.DateField(source="consultation.date", read_only=True)
+    consultation_type = serializers.CharField(
+        source="consultation.consultation_type",
+        read_only=True,
+    )
+    consultation_type_display = serializers.CharField(
+        source="consultation.get_consultation_type_display",
+        read_only=True,
+    )
+
+    class Meta:
+        model = OdontogramVersion
+        fields = (
+            "id",
+            "patient",
+            "consultation",
+            "consultation_date",
+            "consultation_type",
+            "consultation_type_display",
+            "version_number",
+            "schema_version",
+            "dentition",
+            "teeth",
+            "changed_teeth",
+            "note",
+            "based_on",
+            "created_by",
+            "professional_name",
+            "created_at",
+        )
+        read_only_fields = fields
+
+    def get_professional_name(self, obj):
+        return obj.created_by.get_full_name().strip() or obj.created_by.email
+
+
+class OdontogramVersionSummarySerializer(OdontogramVersionSerializer):
+    class Meta(OdontogramVersionSerializer.Meta):
+        fields = tuple(
+            field for field in OdontogramVersionSerializer.Meta.fields if field != "teeth"
+        )
+        read_only_fields = fields
+
+
+class OdontogramRevisionCreateSerializer(serializers.Serializer):
+    base_version_id = serializers.IntegerField(min_value=1)
+    dentition = serializers.ChoiceField(choices=OdontogramVersion.Dentition.choices)
+    teeth = serializers.JSONField()
+    note = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=1000,
+    )
+
+    def validate(self, attrs):
+        attrs["teeth"] = normalize_teeth_snapshot(
+            attrs["teeth"],
+            attrs["dentition"],
+        )
+        return attrs
+
+    def create(self, validated_data):
+        return create_odontogram_revision(
+            consultation=self.context["consultation"],
+            author=self.context["request"].user,
+            **validated_data,
+        )
+
+    def to_representation(self, instance):
+        return OdontogramVersionSerializer(instance, context=self.context).data

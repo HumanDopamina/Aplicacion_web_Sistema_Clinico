@@ -20,7 +20,7 @@ export function PatientTabs({ patientId, active = 'summary', isNew = false }) {
   const tabs = [
     { key: 'summary', label: 'Resumen clínico', to: patientId ? `/pacientes/${patientId}` : '' },
     { key: 'consultations', label: 'Consultas', to: patientId ? `/pacientes/${patientId}/consultas` : '' },
-    { key: 'odontogram', label: 'Odontograma', disabled: true },
+    { key: 'odontogram', label: 'Odontograma', to: patientId ? `/pacientes/${patientId}/odontogramas` : '' },
     { key: 'documents', label: 'Documentos', disabled: true },
   ]
   const classes = (key, disabled) => `whitespace-nowrap border-b-2 py-3 text-xs transition-colors ${active === key ? 'border-blue-600 font-semibold text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'} ${disabled ? 'cursor-not-allowed opacity-45' : ''}`

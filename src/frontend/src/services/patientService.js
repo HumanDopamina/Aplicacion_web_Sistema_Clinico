@@ -44,6 +44,30 @@ export const updatePatientConsultation = (access, patientId, consultationId, cha
   },
 )
 
+export const getConsultationOdontogram = (access, patientId, consultationId) => apiRequest(
+  `/api/patients/${patientId}/consultations/${consultationId}/odontogram/`,
+  { headers: authorization(access) },
+)
+
+export const createOdontogramVersion = (access, patientId, consultationId, version) => apiRequest(
+  `/api/patients/${patientId}/consultations/${consultationId}/odontogram/versions/`,
+  {
+    method: 'POST',
+    body: JSON.stringify(version),
+    headers: authorization(access),
+  },
+)
+
+export const listPatientOdontogramVersions = (access, patientId) => apiRequest(
+  `/api/patients/${patientId}/odontogram-versions/`,
+  { headers: authorization(access) },
+)
+
+export const getPatientOdontogramVersion = (access, patientId, versionId) => apiRequest(
+  `/api/patients/${patientId}/odontogram-versions/${versionId}/`,
+  { headers: authorization(access) },
+)
+
 export const updatePatient = (access, id, changes) => apiRequest(`/api/patients/${id}/`, {
   method: 'PATCH',
   body: JSON.stringify(changes),

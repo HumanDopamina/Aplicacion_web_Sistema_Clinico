@@ -20,6 +20,7 @@ import {
 } from './consultationSchema'
 import { patientIdentity, patientInitials } from './patientDisplay'
 import { PatientHeader, PatientTabs } from './PatientRecordShell'
+import { ConsultationTabs } from './ConsultationRecordShell'
 
 const inputClass = '-mx-2 w-[calc(100%+1rem)] rounded-md border border-transparent bg-transparent px-2 py-1.5 text-sm font-medium text-slate-700 outline-none transition placeholder:italic placeholder:text-slate-400 hover:border-slate-200 hover:bg-slate-50 focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100'
 
@@ -171,6 +172,7 @@ export default function ConsultationRecordPage({ isNew = false }) {
     </div>
     <PatientHeader patient={patient} title={patient.full_name} initials={patientInitials(patient)} isActive={patient.is_active} identityText={patientIdentity(patient)} />
     <PatientTabs patientId={patient.id} active="consultations" />
+    <ConsultationTabs patientId={patient.id} consultationId={consultationId} isNew={isNew} />
     {error ? <p role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p> : null}
 
     <div className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-cyan-100 bg-cyan-50/70 px-5 py-4">
