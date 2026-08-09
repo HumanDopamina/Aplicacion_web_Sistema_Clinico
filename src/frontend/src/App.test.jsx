@@ -8,8 +8,8 @@ import * as authService from './services/authService'
 vi.mock('./services/authService')
 
 const rolePermissions = {
-  ADMINISTRADOR: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'consultations.create', 'consultations.edit', 'appointments.view', 'appointments.create'],
-  RECEPCIONISTA: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'appointments.view', 'appointments.create'],
+  ADMINISTRADOR: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'consultations.create', 'consultations.edit', 'appointments.view', 'appointments.create', 'appointments.edit'],
+  RECEPCIONISTA: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'appointments.view', 'appointments.create', 'appointments.edit'],
   ODONTOLOGO: ['patients.view', 'consultations.view', 'consultations.create', 'consultations.edit', 'appointments.view'],
 }
 

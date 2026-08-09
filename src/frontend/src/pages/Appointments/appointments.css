@@ -1,0 +1,63 @@
+.timeline-heading {
+  display: grid;
+  grid-template-columns: 78px repeat(var(--lane-count), minmax(190px, 1fr));
+  min-width: calc(78px + var(--lane-count) * 190px);
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.dentist-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 58px;
+  border-left: 1px solid #e2e8f0;
+  padding: 10px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dentist-dot { width: 7px; height: 7px; border-radius: 999px; background: #1d4ed8; }
+.timeline-body { position: relative; min-width: calc(78px + var(--lane-count) * 190px); height: var(--timeline-height); }
+.time-axis { position: absolute; inset: 0 auto 0 0; width: 78px; background: #fff; }
+.time-axis span { position: absolute; right: 15px; transform: translateY(-7px); color: #94a3b8; font-size: 10px; font-weight: 700; }
+.timeline-stage { position: absolute; inset: 0 0 0 78px; height: var(--timeline-height); background: linear-gradient(to right, transparent calc(100% - 1px), #e2e8f0 calc(100% - 1px)); background-size: calc(100% / var(--lane-count)) 100%; }
+.hour-line { position: absolute; left: 0; right: 0; border-top: 1px solid #e2e8f0; }
+.now-line { position: absolute; z-index: 3; left: -5px; right: 0; border-top: 2px solid #1d4ed8; }
+.now-line i { position: absolute; left: -4px; top: -5px; width: 9px; height: 9px; border-radius: 999px; background: #1d4ed8; }
+.appointment-card { position: absolute; z-index: 2; top: var(--card-top); left: calc((100% / var(--lane-count)) * var(--lane-index) + 6px); width: calc(100% / var(--lane-count) - 12px); height: calc(var(--card-height) - 4px); overflow: hidden; border: 1px solid #bfdbfe; border-left: 4px solid #1d4ed8; border-radius: 10px; background: #eff6ff; padding: 8px 10px; text-align: left; color: #0f172a; transition: transform 150ms ease, box-shadow 150ms ease; }
+.appointment-card:hover { z-index: 4; transform: translateY(-1px); box-shadow: 0 8px 18px rgb(15 23 42 / 12%); }
+.appointment-card:focus-visible { z-index: 5; outline: 3px solid #93c5fd; outline-offset: 2px; }
+.appointment-card strong, .appointment-card span, .appointment-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appointment-time { color: #1d4ed8; font-size: 10px; font-weight: 800; }
+.appointment-card strong { margin-top: 2px; font-size: 12px; }
+.appointment-reason { margin-top: 1px; color: #475569; font-size: 10px; }
+.appointment-card small { margin-top: 3px; color: #64748b; font-size: 9px; }
+.appointment-card.compact { padding: 4px 8px; }
+.appointment-card.compact strong, .appointment-card.compact .appointment-reason { margin-top: 0; }
+.appointment-card.compact small { display: none; }
+.appointment-status { position: absolute; top: 7px; right: 7px; border-radius: 999px; padding: 2px 5px; font-size: 8px; font-weight: 800; }
+.appointment-card.status-confirmada { border-color: #a7f3d0; border-left-color: #047857; background: #ecfdf5; }
+.appointment-card.status-cancelada { border-color: #fecaca; border-left-color: #b91c1c; background: #fef2f2; opacity: .78; }
+.appointment-card.status-no_asistio { border-color: #fde68a; border-left-color: #b45309; background: #fffbeb; }
+.appointment-card.status-completada { border-color: #cbd5e1; border-left-color: #64748b; background: #f8fafc; }
+
+@media (max-width: 767px) {
+  .appointment-timeline { overflow: visible; border: 0; background: transparent; box-shadow: none; }
+  .timeline-heading, .time-axis, .hour-line, .now-line { display: none; }
+  .timeline-body { min-width: 0; height: auto !important; }
+  .timeline-stage { position: static; display: grid; height: auto !important; gap: 12px; background: transparent; }
+  .appointment-card { position: relative; top: auto; left: auto; width: 100%; height: auto; min-height: 112px; padding: 14px 15px; }
+  .appointment-card strong { margin-top: 8px; font-size: 15px; }
+  .appointment-reason { margin-top: 4px; font-size: 12px; }
+  .appointment-card small, .appointment-card.compact small { display: block; margin-top: 8px; font-size: 11px; }
+  .appointment-card.compact { padding: 14px 15px; }
+  .appointment-card.compact strong { margin-top: 8px; }
+  .appointment-card.compact .appointment-reason { margin-top: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .appointment-card { transition: none; }
+}

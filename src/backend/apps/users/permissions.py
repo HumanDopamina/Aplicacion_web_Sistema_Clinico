@@ -10,6 +10,7 @@ PERMISSION_CATALOG = (
     {"code": "consultations.edit", "label": "Editar consultas", "group": "Consultas"},
     {"code": "appointments.view", "label": "Ver citas", "group": "Citas"},
     {"code": "appointments.create", "label": "Crear citas", "group": "Citas"},
+    {"code": "appointments.edit", "label": "Editar citas", "group": "Citas"},
 )
 
 PERMISSION_CODES = tuple(item["code"] for item in PERMISSION_CATALOG)
@@ -22,6 +23,7 @@ DEFAULT_ROLE_PERMISSIONS = {
         "consultations.view",
         "appointments.view",
         "appointments.create",
+        "appointments.edit",
     ],
     "ODONTOLOGO": [
         "patients.view",

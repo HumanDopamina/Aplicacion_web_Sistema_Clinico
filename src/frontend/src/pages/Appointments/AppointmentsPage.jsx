@@ -1,0 +1,126 @@
+import { useCallback, useEffect, useState } from 'react'
+import { useAuth } from '../../context/authContextValue'
+import {
+  createAppointment,
+  listAppointments,
+  updateAppointment,
+} from '../../services/appointmentService'
+import { listPatients } from '../../services/patientService'
+import AppointmentDetailsPanel from './AppointmentDetailsPanel'
+import AppointmentFormPanel from './AppointmentFormPanel'
+import AppointmentTimeline from './AppointmentTimeline'
+import { formatLongDate, shiftDate, todayValue } from './appointmentDisplay'
+
+const can = (user, permission) => user.role === 'ADMINISTRADOR' || user.permissions?.includes(permission)
+
+export default function AppointmentsPage() {
+  const { user, accessToken } = useAuth()
+  const [selectedDate, setSelectedDate] = useState(todayValue)
+  const [appointments, setAppointments] = useState([])
+  const [patients, setPatients] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [toast, setToast] = useState('')
+  const [formAppointment, setFormAppointment] = useState(undefined)
+  const [formOpen, setFormOpen] = useState(false)
+  const [selectedAppointment, setSelectedAppointment] = useState(null)
+  const canCreate = can(user, 'appointments.create')
+  const canEdit = can(user, 'appointments.edit')
+
+  const loadAgenda = useCallback(() => {
+    let active = true
+    setLoading(true)
+    setError('')
+    Promise.all([
+      listAppointments(accessToken, { date: selectedDate }),
+      listPatients(accessToken),
+    ])
+      .then(([appointmentData, patientData]) => {
+        if (!active) return
+        setAppointments(appointmentData)
+        setPatients(patientData.filter((patient) => patient.is_active))
+      })
+      .catch((requestError) => { if (active) setError(requestError.message) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [accessToken, selectedDate])
+
+  useEffect(() => loadAgenda(), [loadAgenda])
+
+  useEffect(() => {
+    if (!toast) return undefined
+    const timer = setTimeout(() => setToast(''), 3500)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  const openCreate = () => {
+    setFormAppointment(undefined)
+    setSelectedAppointment(null)
+    setFormOpen(true)
+  }
+
+  const saveAppointment = async (values) => {
+    const saved = formAppointment
+      ? await updateAppointment(accessToken, formAppointment.id, values)
+      : await createAppointment(accessToken, values)
+    setSelectedDate(saved.date)
+    setAppointments((current) => {
+      const remaining = current.filter((item) => item.id !== saved.id)
+      return saved.date === selectedDate
+        ? [...remaining, saved].sort((a, b) => a.start_time.localeCompare(b.start_time))
+        : remaining
+    })
+    setFormOpen(false)
+    setFormAppointment(undefined)
+    setToast(formAppointment ? 'Cita actualizada.' : 'Cita programada.')
+  }
+
+  const changeStatus = async (status, extra = {}) => {
+    const saved = await updateAppointment(accessToken, selectedAppointment.id, { status, ...extra })
+    setAppointments((current) => current.map((item) => item.id === saved.id ? saved : item))
+    setSelectedAppointment(saved)
+    const messages = {
+      CONFIRMADA: 'Cita confirmada.', COMPLETADA: 'Cita completada.', CANCELADA: 'Cita cancelada.', NO_ASISTIO: 'Inasistencia registrada.',
+    }
+    setToast(messages[status])
+  }
+
+  const editSelected = () => {
+    setFormAppointment(selectedAppointment)
+    setSelectedAppointment(null)
+    setFormOpen(true)
+  }
+
+  return <div className="mx-auto w-full max-w-7xl">
+    <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Agenda clínica</p>
+        <h1 className="mt-1 font-serif text-4xl font-semibold tracking-tight text-slate-900">Citas</h1>
+        <p className="mt-2 text-sm text-slate-500">Organiza la atención diaria y revisa la disponibilidad del equipo.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" aria-label="Día anterior" onClick={() => setSelectedDate((value) => shiftDate(value, -1))} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-white text-lg text-slate-600 shadow-sm hover:bg-slate-50">‹</button>
+        <button type="button" onClick={() => setSelectedDate(todayValue())} className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Hoy</button>
+        <label className="sr-only" htmlFor="agenda-date">Fecha de agenda</label>
+        <input id="agenda-date" aria-label="Fecha de agenda" type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+        <button type="button" aria-label="Día siguiente" onClick={() => setSelectedDate((value) => shiftDate(value, 1))} className="grid h-11 w-11 place-items-center rounded-xl border border-slate-200 bg-white text-lg text-slate-600 shadow-sm hover:bg-slate-50">›</button>
+        {canCreate ? <button type="button" aria-label="Nueva cita" onClick={openCreate} className="ml-auto h-11 rounded-xl bg-blue-700 px-5 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">＋ Nueva cita</button> : null}
+      </div>
+    </header>
+
+    <section className="mt-8">
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <div><h2 className="font-serif text-2xl font-semibold text-slate-900">{formatLongDate(selectedDate)}</h2><p className="mt-1 text-xs text-slate-500">{appointments.length} {appointments.length === 1 ? 'cita programada' : 'citas programadas'}</p></div>
+        <span className="hidden rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 sm:inline">Vista diaria</span>
+      </div>
+      {loading ? <div className="grid min-h-72 place-content-center rounded-2xl border border-slate-200 bg-white text-center shadow-sm"><span className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-blue-100 border-t-blue-700" aria-hidden="true" /><p className="mt-3 text-sm text-slate-500">Cargando agenda…</p></div> : null}
+      {error ? <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700"><strong className="block">No fue posible cargar la agenda.</strong><span>{error}</span><button type="button" onClick={loadAgenda} className="mt-3 block font-semibold underline">Intentar de nuevo</button></div> : null}
+      {!loading && !error && appointments.length === 0 ? <div className="grid min-h-72 place-content-center rounded-2xl border border-dashed border-blue-200 bg-white px-6 py-12 text-center shadow-sm"><span aria-hidden="true" className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-blue-50 text-2xl text-blue-700">▦</span><p className="mt-4 text-sm font-semibold text-slate-800">No hay citas programadas para este día.</p><p className="mt-1 text-xs text-slate-500">Elige otra fecha o programa una nueva cita.</p>{canCreate ? <button type="button" aria-label="Programar primera cita" onClick={openCreate} className="mx-auto mt-5 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white">Nueva cita</button> : null}</div> : null}
+      {!loading && !error ? <AppointmentTimeline appointments={appointments} selectedDate={selectedDate} onSelect={setSelectedAppointment} /> : null}
+    </section>
+
+    {toast ? <div role="status" className="fixed bottom-5 right-5 z-[60] rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-xl">{toast}</div> : null}
+    {formOpen ? <AppointmentFormPanel accessToken={accessToken} appointment={formAppointment} patients={patients} selectedDate={selectedDate} onClose={() => setFormOpen(false)} onSave={saveAppointment} /> : null}
+    {selectedAppointment ? <AppointmentDetailsPanel appointment={selectedAppointment} canEdit={canEdit} onClose={() => setSelectedAppointment(null)} onEdit={editSelected} onStatus={changeStatus} /> : null}
+  </div>
+}

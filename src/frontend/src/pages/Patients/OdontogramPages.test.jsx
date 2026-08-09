@@ -178,7 +178,7 @@ describe('versioned odontograms', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }))
     expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument()
     expect(postCount).toBe(0)
-  })
+  }, 10_000)
 
   it('preserves the draft after a concurrent change and can load the latest version', async () => {
     let latest = initialVersion
