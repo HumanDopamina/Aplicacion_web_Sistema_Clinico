@@ -1,12 +1,18 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useAuth } from '../../context/authContextValue'
 import { createUser, listUsers, updateUser } from '../../services/userService'
+import RolePermissionsPanel from './RolePermissionsPanel'
+
+const ClinicProfilePanel = lazy(() => import('./ClinicProfilePanel'))
+const BusinessHoursPanel = lazy(() => import('./BusinessHoursPanel'))
+const ServicesPanel = lazy(() => import('./ServicesPanel'))
 
 const settingsSections = [
   ['▤', 'Perfil de la clínica', 'Datos básicos y logo'],
   ['◷', 'Horarios de atención', 'Días y horas laborales'],
   ['✚', 'Servicios y tarifas', 'Tratamientos y precios'],
   ['▣', 'Gestión de Staff', 'Doctores y asistentes'],
+  ['◈', 'Permisos por rol', 'Accesos por perfil'],
   ['●', 'Notificaciones', 'Recordatorios SMS/Email'],
 ]
 
@@ -119,6 +125,7 @@ export default function SettingsPage() {
   const [loadError, setLoadError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
+  const [activeSection, setActiveSection] = useState('Gestión de Staff')
 
   useEffect(() => {
     let active = true
@@ -158,9 +165,10 @@ export default function SettingsPage() {
       <div className="mt-10 grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
         <nav aria-label="Secciones de configuración" className="flex gap-2 overflow-x-auto lg:block lg:space-y-3">
           {settingsSections.map(([icon, title, description]) => {
-            const active = title === 'Gestión de Staff'
+            const active = title === activeSection
+            const available = title !== 'Notificaciones'
             return (
-              <button key={title} type="button" aria-current={active ? 'page' : undefined} className={`flex min-w-60 items-center gap-3 rounded-xl border p-2.5 text-left transition ${active ? 'border-2 border-blue-700 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+              <button key={title} type="button" disabled={!available} onClick={() => { if (available) setActiveSection(title) }} aria-current={active ? 'page' : undefined} className={`flex min-w-60 items-center gap-3 rounded-xl border p-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${active ? 'border-2 border-blue-700 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
                 <span aria-hidden="true" className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${active ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'}`}>{icon}</span>
                 <span><strong className="block text-sm">{title}</strong><small className="block text-[11px] opacity-70">{description}</small></span>
               </button>
@@ -168,7 +176,7 @@ export default function SettingsPage() {
           })}
         </nav>
 
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="staff-title">
+        {activeSection === 'Gestión de Staff' ? <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-labelledby="staff-title">
           <div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-start sm:justify-between">
             <div><h2 id="staff-title" className="font-serif text-xl font-semibold text-slate-900">Gestión de Staff</h2><p className="mt-1 text-xs text-slate-500">Administra los profesionales y asistentes de la clínica.</p></div>
             <button type="button" aria-label="Añadir miembro" onClick={openCreateForm} className="rounded-xl bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">＋ Añadir miembro</button>
@@ -200,7 +208,12 @@ export default function SettingsPage() {
               </table>
             </div>
           ) : null}
-        </section>
+        </section> : <Suspense fallback={<div className="grid min-h-80 place-items-center rounded-2xl border border-slate-200 bg-white text-sm text-slate-500">Cargando configuración…</div>}>
+          {activeSection === 'Perfil de la clínica' ? <ClinicProfilePanel accessToken={accessToken} /> : null}
+          {activeSection === 'Horarios de atención' ? <BusinessHoursPanel accessToken={accessToken} /> : null}
+          {activeSection === 'Servicios y tarifas' ? <ServicesPanel accessToken={accessToken} /> : null}
+          {activeSection === 'Permisos por rol' ? <RolePermissionsPanel accessToken={accessToken} /> : null}
+        </Suspense>}
       </div>
       {formOpen ? <MemberForm onClose={() => setFormOpen(false)} onSaved={saveUser} accessToken={accessToken} editingUser={editingUser} /> : null}
     </div>

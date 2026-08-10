@@ -15,3 +15,13 @@ export const updateUser = (access, id, changes) => apiRequest(`/api/auth/users/$
   body: JSON.stringify(changes),
   headers: { Authorization: `Bearer ${access}` },
 })
+
+export const listRolePermissionPresets = (access) => apiRequest('/api/auth/role-permissions/', {
+  headers: { Authorization: `Bearer ${access}` },
+})
+
+export const updateRolePermissionPreset = (access, role, permissions) => apiRequest(`/api/auth/role-permissions/${role}/`, {
+  method: 'PATCH',
+  body: JSON.stringify({ permissions }),
+  headers: { Authorization: `Bearer ${access}` },
+})

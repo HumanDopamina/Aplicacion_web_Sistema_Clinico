@@ -28,6 +28,12 @@ Use four-space indentation and PEP 8 conventions for Python. Name modules and fu
 
 Django tests belong in each app's `tests.py` (or a `tests/` package as suites grow). Frontend tests use Vitest, jsdom, and Testing Library; colocate them as `*.test.jsx`, following `LoginPage.test.jsx`. Test observable behavior, authentication boundaries, validation, and API error states. No coverage threshold is configured, so every behavior change should include focused regression tests.
 
+## User Story Documentation
+
+- When a user story is implemented or validated, create or update `docs/user-stories/HU-XX-<feature>.md` with its status, acceptance evidence, affected interfaces, and verification commands.
+- Update the implemented-story summary in `README.md` whenever a story is closed.
+- After verification, commit each completed user story with a conventional subject that includes its identifier, for example `feat: complete HU-10 patient registration`.
+
 ## Commit & Pull Request Guidelines
 
 History is brief and inconsistent; adopt short, imperative subjects with a conventional prefix, such as `feat: add patient search` or `fix: refresh expired token`. Keep commits scoped to one concern. Pull requests should explain the change and verification performed, link relevant issues, note migrations or configuration changes, and include screenshots for visible UI updates. Never commit virtual environments, `node_modules`, secrets, or local databases.

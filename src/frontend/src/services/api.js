@@ -3,37 +3,74 @@ const SESSION_KEY = 'dentalclinic_session'
 
 let refreshPromise = null
 
+function firstError(value) {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const message = firstError(item)
+      if (message) return message
+    }
+  }
+  if (value && typeof value === 'object') {
+    for (const item of Object.values(value)) {
+      const message = firstError(item)
+      if (message) return message
+    }
+  }
+  return ''
+}
+
 function errorMessage(data) {
   if (Array.isArray(data.detail)) return data.detail[0]
   if (typeof data.detail === 'string') return data.detail
-  const fieldError = Object.values(data).find((value) => Array.isArray(value) && value.length)
-  return fieldError?.[0] || 'No fue posible procesar la solicitud.'
+  return firstError(data) || 'No fue posible procesar la solicitud.'
 }
 
-export async function apiRequest(path, options = {}) {
+async function authenticatedResponse(path, options = {}) {
   const { _retried, ...requestOptions } = options
   const currentAccess = options.headers?.Authorization && storedSession()?.session?.access
+  const contentHeaders = options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }
   const response = await fetch(`${API_URL}${path}`, {
     ...requestOptions,
     headers: {
-      'Content-Type': 'application/json',
+      ...contentHeaders,
       ...options.headers,
       ...(currentAccess ? { Authorization: `Bearer ${currentAccess}` } : {}),
     },
   })
-  const data = await response.json().catch(() => ({}))
   if (response.status === 401 && options.headers?.Authorization && !_retried) {
     const access = await renewAccessToken()
-    return apiRequest(path, {
+    return authenticatedResponse(path, {
       ...options,
       _retried: true,
       headers: { ...options.headers, Authorization: `Bearer ${access}` },
     })
   }
+  return response
+}
+
+export async function apiRequest(path, options = {}) {
+  const response = await authenticatedResponse(path, options)
+  const data = await response.json().catch(() => ({}))
   if (!response.ok) {
-    throw new Error(errorMessage(data))
+    const error = new Error(errorMessage(data))
+    error.status = response.status
+    error.data = data
+    throw error
   }
   return data
+}
+
+export async function apiBlobRequest(path, options = {}) {
+  const response = await authenticatedResponse(path, options)
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    const error = new Error(errorMessage(data))
+    error.status = response.status
+    error.data = data
+    throw error
+  }
+  return response.blob()
 }
 
 function storedSession() {

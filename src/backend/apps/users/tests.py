@@ -36,6 +36,24 @@ class LoginApiTests(APITestCase):
         self.assertIn("access", response.data)
         self.assertIn("refresh", response.data)
         self.assertEqual(response.data["user"]["role"], User.Role.ADMINISTRADOR)
+        self.assertEqual(
+            response.data["user"]["permissions"],
+            [
+                "patients.view",
+                "patients.create",
+                "patients.edit",
+                "consultations.view",
+                "consultations.create",
+                "consultations.edit",
+                "appointments.view",
+                "appointments.view_all",
+                "appointments.create",
+                "appointments.edit",
+                "documents.view",
+                "documents.create",
+                "documents.delete",
+            ],
+        )
         self.assertNotIn("password", response.data["user"])
 
     def test_invalid_credentials_return_generic_error(self):
@@ -341,6 +359,42 @@ class UserRegistrationApiTests(APITestCase):
         data.update(overrides)
         return data
 
+    def test_hu09_administrator_lists_every_user_with_role_and_status(self):
+        User.objects.create_user(
+            email="activo@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Ana",
+            role=User.Role.ODONTOLOGO,
+        )
+        User.objects.create_user(
+            email="inactivo@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Bruno",
+            role=User.Role.RECEPCIONISTA,
+            is_active=False,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        for user in response.data:
+            self.assertIn("role", user)
+            self.assertIn("is_active", user)
+        users_by_email = {user["email"]: user for user in response.data}
+        self.assertEqual(
+            users_by_email["activo@dentalclinic.com"]["role"],
+            User.Role.ODONTOLOGO,
+        )
+        self.assertTrue(users_by_email["activo@dentalclinic.com"]["is_active"])
+        self.assertEqual(
+            users_by_email["inactivo@dentalclinic.com"]["role"],
+            User.Role.RECEPCIONISTA,
+        )
+        self.assertFalse(users_by_email["inactivo@dentalclinic.com"]["is_active"])
+        self.assertIn("admin-users@dentalclinic.com", users_by_email)
+
     def test_administrator_creates_a_login_ready_user_without_exposing_password(self):
         self.client.force_authenticate(self.admin)
 
@@ -414,7 +468,6 @@ class UserRegistrationApiTests(APITestCase):
                 "first_name": "Elena",
                 "last_name": "Vargas",
                 "role": User.Role.ODONTOLOGO,
-                "is_active": False,
                 "is_superuser": True,
             },
             format="json",
@@ -425,10 +478,69 @@ class UserRegistrationApiTests(APITestCase):
         self.assertEqual(member.email, "editado@dentalclinic.com")
         self.assertEqual(member.first_name, "Elena")
         self.assertEqual(member.role, User.Role.ODONTOLOGO)
-        self.assertFalse(member.is_active)
+        self.assertTrue(member.is_active)
         self.assertFalse(member.is_superuser)
         self.assertTrue(member.check_password("ContraseñaOriginal123!"))
         self.assertNotIn("password", response.data)
+
+    def test_hu07_deactivation_preserves_user_and_blocks_login(self):
+        password = "ContraseñaOriginal123!"
+        member = User.objects.create_user(
+            email="desactivar@dentalclinic.com",
+            password=password,
+            first_name="Elena",
+            last_name="Vargas",
+            role=User.Role.RECEPCIONISTA,
+        )
+        original_id = member.pk
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": original_id}),
+            {"is_active": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        member.refresh_from_db()
+        self.assertFalse(member.is_active)
+        self.assertTrue(
+            User.objects.filter(
+                pk=original_id,
+                email="desactivar@dentalclinic.com",
+                first_name="Elena",
+                last_name="Vargas",
+                role=User.Role.RECEPCIONISTA,
+            ).exists()
+        )
+
+        self.client.force_authenticate(user=None)
+        login = self.client.post(
+            reverse("users:login"),
+            {"email": member.email, "password": password},
+            format="json",
+        )
+
+        self.assertEqual(login.status_code, 400)
+        self.assertEqual(
+            login.data["detail"][0],
+            "Correo electrónico o contraseña incorrectos.",
+        )
+
+    def test_hu07_user_detail_does_not_allow_deletion(self):
+        member = User.objects.create_user(
+            email="conservar@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+        )
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(User.objects.filter(pk=member.pk).exists())
 
     def test_update_rejects_an_email_used_by_another_user(self):
         member = User.objects.create_user(
@@ -469,3 +581,138 @@ class UserRegistrationApiTests(APITestCase):
         self.assertEqual(response.status_code, 403)
         self.admin.refresh_from_db()
         self.assertEqual(self.admin.first_name, "Admin")
+
+
+class RolePermissionPresetApiTests(APITestCase):
+    list_url = "/api/auth/role-permissions/"
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="admin-permissions@dentalclinic.com",
+            password="ContraseñaAdmin123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.receptionist = User.objects.create_user(
+            email="recepcion-permissions@dentalclinic.com",
+            password="ContraseñaRecepcion123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+
+    def test_hu09_administrator_lists_editable_role_presets_and_catalog(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["code"] for item in response.data["available_permissions"]],
+            [
+                "patients.view",
+                "patients.create",
+                "patients.edit",
+                "consultations.view",
+                "consultations.create",
+                "consultations.edit",
+                "appointments.view",
+                "appointments.view_all",
+                "appointments.create",
+                "appointments.edit",
+                "documents.view",
+                "documents.create",
+                "documents.delete",
+            ],
+        )
+        self.assertEqual(
+            {preset["role"] for preset in response.data["presets"]},
+            {User.Role.RECEPCIONISTA, User.Role.ODONTOLOGO},
+        )
+
+    def test_hu09_administrator_replaces_a_role_permission_preset(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.ODONTOLOGO}/",
+            {"permissions": ["patients.view", "patients.create"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data,
+            {
+                "role": User.Role.ODONTOLOGO,
+                "permissions": ["patients.view", "patients.create"],
+            },
+        )
+
+    def test_view_all_requires_the_base_appointment_view_permission(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.ODONTOLOGO}/",
+            {"permissions": ["appointments.view_all"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("appointments.view_all", str(response.data))
+
+    def test_hu09_effective_permissions_follow_the_global_role_preset(self):
+        self.client.force_authenticate(self.admin)
+        self.client.patch(
+            f"{self.list_url}{User.Role.RECEPCIONISTA}/",
+            {"permissions": ["patients.view", "patients.create"]},
+            format="json",
+        )
+        self.client.force_authenticate(self.receptionist)
+
+        profile = self.client.get(reverse("users:current-user"))
+
+        self.assertEqual(profile.status_code, 200)
+        self.assertIn("permissions", profile.data)
+        self.assertEqual(
+            profile.data["permissions"],
+            ["patients.view", "patients.create"],
+        )
+
+    def test_hu09_rejects_unknown_permission_codes_without_changing_preset(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.RECEPCIONISTA}/",
+            {"permissions": ["users.become_admin"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        current = self.client.get(self.list_url)
+        receptionist = next(
+            preset
+            for preset in current.data["presets"]
+            if preset["role"] == User.Role.RECEPCIONISTA
+        )
+        self.assertNotIn("users.become_admin", receptionist["permissions"])
+
+    def test_hu09_non_administrator_cannot_read_or_change_role_presets(self):
+        self.client.force_authenticate(self.receptionist)
+
+        self.assertEqual(self.client.get(self.list_url).status_code, 403)
+        self.assertEqual(
+            self.client.patch(
+                f"{self.list_url}{User.Role.ODONTOLOGO}/",
+                {"permissions": ["patients.view"]},
+                format="json",
+            ).status_code,
+            403,
+        )
+
+    def test_hu09_administrator_role_is_not_an_editable_preset(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.ADMINISTRADOR}/",
+            {"permissions": []},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
