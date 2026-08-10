@@ -305,7 +305,7 @@ Los archivos se guardan fuera del directorio público con nombres UUID; la API n
 3. La agenda impide que un paciente u odontólogo ocupe intervalos solapados; las citas adyacentes sí están permitidas.
 4. Selecciona una tarjeta para editarla, confirmarla, completarla, cancelarla o registrar una inasistencia según su estado y tus permisos.
 
-La agenda utiliza `appointments.view`, `appointments.create` y `appointments.edit`. Recepción obtiene los tres permisos por defecto, Odontología conserva visualización y Administración mantiene acceso completo. La vista semanal distribuye siete días y la mensual resume la ocupación del mes; ambas permiten abrir directamente la agenda diaria. Las citas canceladas permanecen en el calendario para trazabilidad, pero dejan libre su intervalo.
+La agenda utiliza `appointments.view`, `appointments.create` y `appointments.edit`; `appointments.view_all` amplía el alcance a las citas de todo el equipo. Recepción recibe los cuatro permisos por defecto, Odontología conserva visualización únicamente de sus propias citas y Administración mantiene acceso completo implícito. Este alcance se aplica en el dashboard, las vistas diaria, semanal y mensual, el detalle y la disponibilidad. Las citas canceladas permanecen en el calendario para trazabilidad, pero dejan libre su intervalo.
 
 ## Consideraciones para producción
 

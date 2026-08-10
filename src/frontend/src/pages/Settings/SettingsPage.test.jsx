@@ -72,11 +72,12 @@ describe('SettingsPage staff management', () => {
         { code: 'patients.create', label: 'Registrar pacientes', group: 'Pacientes' },
         { code: 'patients.edit', label: 'Editar pacientes', group: 'Pacientes' },
         { code: 'appointments.view', label: 'Ver citas', group: 'Citas' },
+        { code: 'appointments.view_all', label: 'Ver citas de todo el equipo', group: 'Citas' },
         { code: 'appointments.create', label: 'Crear citas', group: 'Citas' },
         { code: 'appointments.edit', label: 'Editar citas', group: 'Citas' },
       ],
       presets: [
-        { role: 'RECEPCIONISTA', permissions: ['patients.view', 'patients.create', 'patients.edit', 'appointments.view', 'appointments.create', 'appointments.edit'] },
+        { role: 'RECEPCIONISTA', permissions: ['patients.view', 'patients.create', 'patients.edit', 'appointments.view', 'appointments.view_all', 'appointments.create', 'appointments.edit'] },
         { role: 'ODONTOLOGO', permissions: ['patients.view', 'appointments.view'] },
       ],
     })
@@ -163,6 +164,18 @@ describe('SettingsPage staff management', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Permisos de Odontólogo actualizados.',
     )
+  })
+
+  it('removes team appointment visibility when base appointment access is disabled', async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: /Permisos por rol/ }))
+    expect(await screen.findByLabelText('Ver citas de todo el equipo')).toBeChecked()
+
+    fireEvent.click(screen.getByLabelText('Ver citas'))
+
+    expect(screen.getByLabelText('Ver citas')).not.toBeChecked()
+    expect(screen.getByLabelText('Ver citas de todo el equipo')).not.toBeChecked()
   })
 
   it('registers a member and adds it to the staff list', async () => {

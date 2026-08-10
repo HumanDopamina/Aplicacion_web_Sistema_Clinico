@@ -186,6 +186,51 @@ class AppointmentApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["id"] for item in response.data], [expected.pk])
 
+    def test_dentist_without_view_all_only_lists_own_appointments(self):
+        own = self.create_appointment(dentist=self.dentist)
+        self.create_appointment(
+            patient=self.other_patient,
+            dentist=self.other_dentist,
+            start_time=time(11, 0),
+        )
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.get(
+            f"{self.list_url}?date=2026-08-12&dentist={self.other_dentist.pk}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, [])
+
+        response = self.client.get(f"{self.list_url}?date=2026-08-12")
+        self.assertEqual([item["id"] for item in response.data], [own.pk])
+
+    def test_dentist_with_view_all_lists_the_team_appointments(self):
+        first = self.create_appointment(dentist=self.dentist)
+        second = self.create_appointment(
+            patient=self.other_patient,
+            dentist=self.other_dentist,
+            start_time=time(11, 0),
+        )
+        RolePermissionPreset.objects.update_or_create(
+            role=User.Role.ODONTOLOGO,
+            defaults={"permissions": ["appointments.view", "appointments.view_all"]},
+        )
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.get(f"{self.list_url}?date=2026-08-12")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [first.pk, second.pk])
+
+    def test_dentist_without_view_all_cannot_retrieve_another_dentists_appointment(self):
+        appointment = self.create_appointment(dentist=self.other_dentist)
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.get(f"{self.list_url}{appointment.pk}/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_list_filters_an_inclusive_date_range_for_calendar_views(self):
         first = self.create_appointment(date=date(2026, 8, 10))
         second = self.create_appointment(
@@ -221,6 +266,17 @@ class AppointmentApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["id"] for item in response.data], [self.other_dentist.pk])
         self.assertEqual(response.data[0]["full_name"], "Mario Ruiz")
+
+    def test_availability_for_a_restricted_dentist_only_returns_their_account(self):
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.get(
+            f"{self.list_url}dentists/availability/"
+            "?date=2026-08-12&start_time=11:00&duration_minutes=30",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [self.dentist.pk])
 
     def test_patch_excludes_current_appointment_from_conflicts(self):
         appointment = self.create_appointment()
@@ -289,6 +345,52 @@ class AppointmentApiTests(APITestCase):
             self.client.patch(detail_url, {"reason": "Sin permiso"}, format="json").status_code,
             403,
         )
+
+    def test_restricted_dentist_can_only_create_and_edit_their_own_appointments(self):
+        RolePermissionPreset.objects.update_or_create(
+            role=User.Role.ODONTOLOGO,
+            defaults={
+                "permissions": [
+                    "appointments.view",
+                    "appointments.create",
+                    "appointments.edit",
+                ],
+            },
+        )
+        self.client.force_authenticate(self.dentist)
+
+        other_create = self.client.post(
+            self.list_url,
+            self.payload(dentist=self.other_dentist.pk),
+            format="json",
+        )
+        own_create = self.client.post(
+            self.list_url,
+            self.payload(dentist=self.dentist.pk),
+            format="json",
+        )
+
+        self.assertEqual(other_create.status_code, 403)
+        self.assertEqual(own_create.status_code, 201)
+
+        reassign = self.client.patch(
+            f"{self.list_url}{own_create.data['id']}/",
+            {"dentist": self.other_dentist.pk},
+            format="json",
+        )
+        self.assertEqual(reassign.status_code, 403)
+
+        other_appointment = self.create_appointment(
+            patient=self.other_patient,
+            dentist=self.other_dentist,
+            start_time=time(13, 0),
+        )
+        other_edit = self.client.patch(
+            f"{self.list_url}{other_appointment.pk}/",
+            {"dentist": self.other_dentist.pk, "reason": "Intento de edición"},
+            format="json",
+        )
+        self.assertEqual(other_edit.status_code, 404)
 
     def test_accepts_15_minute_blocks_and_optional_active_service(self):
         category = ServiceCategory.objects.create(name="Ortodoncia")

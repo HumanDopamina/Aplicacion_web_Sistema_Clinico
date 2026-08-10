@@ -228,4 +228,9 @@ class RolePermissionPresetSerializer(serializers.ModelSerializer):
         read_only_fields = ("role",)
 
     def validate_permissions(self, value):
-        return order_permissions(value)
+        permissions = order_permissions(value)
+        if "appointments.view_all" in permissions and "appointments.view" not in permissions:
+            raise serializers.ValidationError(
+                "appointments.view_all requiere el permiso appointments.view.",
+            )
+        return permissions
