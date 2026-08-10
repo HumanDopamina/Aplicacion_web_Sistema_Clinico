@@ -18,6 +18,7 @@ import Sidebar from './components/Sidebar'
 
 const AppointmentsPage = lazy(() => import('./pages/Appointments/AppointmentsPage'))
 const PatientDocumentsPage = lazy(() => import('./pages/Patients/PatientDocumentsPage'))
+const MyProfilePage = lazy(() => import('./pages/Profile/MyProfilePage'))
 
 function ProtectedLayout({ children, allowedRoles, requiredPermission }) {
   const { user } = useAuth()
@@ -50,6 +51,7 @@ export default function App() {
     <Route path="/restablecer-contrasena/:uid/:token" element={<PasswordResetConfirmPage />} />
     <Route path="/bienvenida" element={<ProtectedLayout><WelcomePage /></ProtectedLayout>} />
     <Route path="/cambiar-contrasena" element={<ProtectedLayout><ChangePasswordPage /></ProtectedLayout>} />
+    <Route path="/mi-perfil" element={<ProtectedLayout><Suspense fallback={<p className="text-sm text-slate-500">Cargando perfil…</p>}><MyProfilePage /></Suspense></ProtectedLayout>} />
     <Route path="/usuarios" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Usuarios" /></ProtectedLayout>} />
     <Route path="/pacientes" element={<ProtectedLayout requiredPermission="patients.view"><PatientsPage /></ProtectedLayout>} />
     <Route path="/pacientes/nuevo" element={<ProtectedLayout requiredPermission="patients.create"><PatientRecordPage isNew /></ProtectedLayout>} />

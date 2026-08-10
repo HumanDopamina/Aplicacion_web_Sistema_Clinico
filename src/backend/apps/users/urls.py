@@ -11,6 +11,7 @@ from .views import (
     RolePermissionPresetCollectionView,
     RolePermissionPresetDetailView,
     UserCollectionView,
+    UserAvatarView,
     UserDetailView,
 )
 
@@ -28,8 +29,10 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("me/", CurrentUserView.as_view(), name="current-user"),
+    path("me/avatar/", UserAvatarView.as_view(), name="current-user-avatar"),
     path("users/", UserCollectionView.as_view(), name="user-list"),
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
+    path("users/<int:pk>/avatar/", UserAvatarView.as_view(), name="user-avatar"),
     path(
         "role-permissions/",
         RolePermissionPresetCollectionView.as_view(),

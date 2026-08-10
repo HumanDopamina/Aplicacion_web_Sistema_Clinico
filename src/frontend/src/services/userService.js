@@ -1,27 +1,51 @@
-import { apiRequest } from './api'
+import { apiBlobRequest, apiRequest } from './api'
+
+const auth = (access) => ({ Authorization: `Bearer ${access}` })
+
+const profileFormData = (values) => {
+  const data = new FormData()
+  Object.entries(values).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) data.append(key, value)
+  })
+  return data
+}
 
 export const listUsers = (access) => apiRequest('/api/auth/users/', {
-  headers: { Authorization: `Bearer ${access}` },
+  headers: auth(access),
 })
 
 export const createUser = (access, user) => apiRequest('/api/auth/users/', {
   method: 'POST',
-  body: JSON.stringify(user),
-  headers: { Authorization: `Bearer ${access}` },
+  body: profileFormData(user),
+  headers: auth(access),
 })
 
 export const updateUser = (access, id, changes) => apiRequest(`/api/auth/users/${id}/`, {
   method: 'PATCH',
-  body: JSON.stringify(changes),
-  headers: { Authorization: `Bearer ${access}` },
+  body: profileFormData(changes),
+  headers: auth(access),
+})
+
+export const getCurrentUser = (access) => apiRequest('/api/auth/me/', {
+  headers: auth(access),
+})
+
+export const updateCurrentProfile = (access, changes) => apiRequest('/api/auth/me/', {
+  method: 'PATCH',
+  body: profileFormData(changes),
+  headers: auth(access),
+})
+
+export const getUserAvatarContent = (access, avatarUrl) => apiBlobRequest(avatarUrl, {
+  headers: auth(access),
 })
 
 export const listRolePermissionPresets = (access) => apiRequest('/api/auth/role-permissions/', {
-  headers: { Authorization: `Bearer ${access}` },
+  headers: auth(access),
 })
 
 export const updateRolePermissionPreset = (access, role, permissions) => apiRequest(`/api/auth/role-permissions/${role}/`, {
   method: 'PATCH',
   body: JSON.stringify({ permissions }),
-  headers: { Authorization: `Bearer ${access}` },
+  headers: auth(access),
 })

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { logout as revokeSession } from '../services/authService'
 import { AuthContext } from './authContextValue'
 
@@ -29,5 +29,14 @@ export function AuthProvider({ children }) {
       }
     }
   }
-  return <AuthContext.Provider value={{ user: session?.user, accessToken: session?.access, signIn, signOut }}>{children}</AuthContext.Provider>
+  const updateUser = useCallback((user) => {
+    setSession((current) => {
+      if (!current) return current
+      const next = { ...current, user }
+      const storage = localStorage.getItem(KEY) ? localStorage : sessionStorage
+      storage.setItem(KEY, JSON.stringify(next))
+      return next
+    })
+  }, [])
+  return <AuthContext.Provider value={{ user: session?.user, accessToken: session?.access, signIn, signOut, updateUser }}>{children}</AuthContext.Provider>
 }

@@ -1,9 +1,12 @@
+import mimetypes
+
 from rest_framework import status
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.db.models import F
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
@@ -15,6 +18,7 @@ from rest_framework.views import APIView
 
 from .serializers import (
     ChangePasswordSerializer,
+    CurrentUserProfileSerializer,
     LoginSerializer,
     LogoutSerializer,
     PasswordResetConfirmSerializer,
@@ -24,7 +28,7 @@ from .serializers import (
     UserAdminUpdateSerializer,
 )
 from .models import RolePermissionPreset, User
-from .permissions import PERMISSION_CATALOG, get_effective_permissions
+from .permissions import PERMISSION_CATALOG
 
 
 PASSWORD_RESET_MESSAGE = (
@@ -46,14 +50,39 @@ class CurrentUserView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
-        return Response({
-            "id": user.id,
-            "email": user.email,
-            "first_name": user.first_name,
-            "role": user.role,
-            "permissions": get_effective_permissions(user),
-        })
+        serializer = CurrentUserProfileSerializer(
+            request.user,
+            context={"request": request, "avatar_route": "users:current-user-avatar"},
+        )
+        return Response(serializer.data)
+
+    def patch(self, request):
+        serializer = CurrentUserProfileSerializer(
+            request.user,
+            data=request.data,
+            partial=True,
+            context={"request": request, "avatar_route": "users:current-user-avatar"},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
+
+class UserAvatarView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk=None):
+        user = request.user if pk is None else get_object_or_404(User, pk=pk)
+        if user.pk != request.user.pk and request.user.role != User.Role.ADMINISTRADOR:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        if not user.avatar:
+            raise Http404
+        content_type = mimetypes.guess_type(user.avatar.name)[0] or "application/octet-stream"
+        response = FileResponse(user.avatar.open("rb"), content_type=content_type)
+        response["Content-Disposition"] = "inline"
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class LogoutView(APIView):
