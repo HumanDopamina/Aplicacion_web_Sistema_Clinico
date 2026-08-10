@@ -93,6 +93,41 @@ describe('patient documents page', () => {
     expect(within(dialog).getByLabelText('Categoría')).toHaveValue('Fotografía clínica')
   })
 
+  it('adds a newly used category to the filter immediately after upload', async () => {
+    let storedDocuments = []
+    let categoryRequests = 0
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/documents/') && options.method === 'POST') {
+        storedDocuments = [{ ...document, id: 9, original_name: 'nueva-radiografia.pdf' }]
+        return Promise.resolve(jsonResponse(storedDocuments, 201))
+      }
+      if (url.endsWith('/api/patients/1/documents/')) {
+        return Promise.resolve(jsonResponse(storedDocuments))
+      }
+      if (url.endsWith('/api/patients/document-categories/')) {
+        categoryRequests += 1
+        return Promise.resolve(jsonResponse(categoryRequests === 1 ? [] : ['Radiografía']))
+      }
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patient))
+      throw new Error(`Unexpected request: ${url} ${options.method || 'GET'}`)
+    }))
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Adjuntar documentos' }))
+    const dialog = screen.getByRole('dialog', { name: 'Adjuntar documentos' })
+    fireEvent.change(within(dialog).getByLabelText('Seleccionar archivos'), {
+      target: { files: [new File(['%PDF'], 'nueva-radiografia.pdf', { type: 'application/pdf' })] },
+    })
+    fireEvent.change(within(dialog).getByLabelText('Categoría'), { target: { value: 'Radiografía' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Guardar documentos' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Adjuntar documentos' })).not.toBeInTheDocument())
+    expect(screen.getAllByText('nueva-radiografia.pdf').length).toBeGreaterThan(0)
+    expect(within(screen.getByLabelText('Filtrar por categoría')).getByRole('option', {
+      name: 'Radiografía',
+    })).toBeInTheDocument()
+  })
+
   it('previews an authenticated PDF and offers deletion only with explicit permission', async () => {
     const pdfBlob = new Blob(['%PDF'], { type: 'application/pdf' })
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:preview')

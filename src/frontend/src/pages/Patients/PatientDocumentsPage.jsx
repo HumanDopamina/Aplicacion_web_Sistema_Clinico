@@ -54,8 +54,12 @@ export default function PatientDocumentsPage() {
   const loadDocuments = async () => {
     setLoadingDocuments(true)
     try {
-      const loaded = await listPatientDocuments(accessToken, patientId, { search: deferredSearch, category })
-      setDocuments(loaded)
+      const [loadedDocuments, loadedCategories] = await Promise.all([
+        listPatientDocuments(accessToken, patientId, { search: deferredSearch, category }),
+        listDocumentCategories(accessToken),
+      ])
+      setDocuments(loadedDocuments)
+      setCategories(loadedCategories)
       setError('')
     } catch (requestError) {
       setError(requestError.message)
