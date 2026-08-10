@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext } from '../../context/authContextValue'
 import * as appointmentService from '../../services/appointmentService'
 import { listPatients } from '../../services/patientService'
+import { listClinicServices } from '../../services/clinicService'
 import AppointmentsPage from './AppointmentsPage'
 
 vi.mock('../../services/appointmentService')
@@ -10,6 +11,7 @@ vi.mock('../../services/patientService', async (importOriginal) => ({
   ...await importOriginal(),
   listPatients: vi.fn(),
 }))
+vi.mock('../../services/clinicService', () => ({ listClinicServices: vi.fn() }))
 
 const localDate = () => {
   const now = new Date()
@@ -73,6 +75,7 @@ function renderPage(user = receptionist) {
 
 describe('AppointmentsPage', () => {
   beforeEach(() => {
+    listClinicServices.mockResolvedValue([])
     appointmentService.listAppointments.mockResolvedValue([appointment()])
     appointmentService.getAvailableDentists.mockResolvedValue([dentist])
     appointmentService.createAppointment.mockResolvedValue(appointment())
@@ -181,23 +184,29 @@ describe('AppointmentsPage', () => {
 
   it('creates an appointment from the accessible side panel', async () => {
     appointmentService.listAppointments.mockResolvedValue([])
+    listClinicServices.mockResolvedValue([{
+      id: 4, name: 'Control de ortodoncia', duration_minutes: 45, is_active: true,
+    }])
     renderPage()
     await screen.findByText('No hay citas programadas para este día.')
 
     fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }))
     const dialog = screen.getByRole('dialog', { name: 'Nueva cita' })
     fireEvent.change(within(dialog).getByLabelText('Paciente'), { target: { value: '1' } })
+    fireEvent.change(within(dialog).getByLabelText(/Servicio/), { target: { value: '4' } })
+    expect(within(dialog).getByLabelText('Duración')).toHaveValue('45')
+    expect(within(dialog).getByLabelText('Motivo')).toHaveValue('Control de ortodoncia')
     fireEvent.change(within(dialog).getByLabelText('Hora'), { target: { value: '09:00' } })
     await waitFor(() => expect(within(dialog).getByLabelText('Odontólogo').options.length).toBe(2))
     fireEvent.change(within(dialog).getByLabelText('Odontólogo'), { target: { value: '3' } })
-    fireEvent.change(within(dialog).getByLabelText('Motivo'), {
-      target: { value: 'Valoración de ortodoncia' },
-    })
     fireEvent.click(within(dialog).getByRole('button', { name: 'Programar cita' }))
 
     expect(await screen.findByText('Cita programada.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ })).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Nueva cita' })).not.toBeInTheDocument()
+    expect(appointmentService.createAppointment).toHaveBeenCalledWith(
+      'access-token', expect.objectContaining({ service: 4, duration_minutes: 45, reason: 'Control de ortodoncia' }),
+    )
   })
 
   it('preserves the form and explains a scheduling conflict', async () => {

@@ -1,9 +1,9 @@
-import { formatClock, minutesFromClock, statusTone, todayValue } from './appointmentDisplay'
+import { currentClockMinutes, formatClock, minutesFromClock, statusTone, todayValue } from './appointmentDisplay'
 import './appointments.css'
 
 const HOUR_HEIGHT = 72
 
-export default function AppointmentTimeline({ appointments, selectedDate, onSelect }) {
+export default function AppointmentTimeline({ appointments, selectedDate, onSelect, timeZone }) {
   if (appointments.length === 0) return null
   const dentists = [...new Map(appointments.map((item) => [item.dentist, {
     id: item.dentist, name: item.dentist_name,
@@ -15,9 +15,8 @@ export default function AppointmentTimeline({ appointments, selectedDate, onSele
   const endHour = Math.max(19, Math.ceil(Math.max(...ends) / 60))
   const hours = Array.from({ length: endHour - startHour + 1 }, (_, index) => startHour + index)
   const stageHeight = (endHour - startHour) * HOUR_HEIGHT
-  const now = new Date()
-  const nowMinutes = now.getHours() * 60 + now.getMinutes()
-  const showNow = selectedDate === todayValue() && nowMinutes >= startHour * 60 && nowMinutes <= endHour * 60
+  const nowMinutes = currentClockMinutes(timeZone)
+  const showNow = selectedDate === todayValue(timeZone) && nowMinutes >= startHour * 60 && nowMinutes <= endHour * 60
 
   return <section aria-label="Agenda diaria" className="appointment-timeline overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div className="timeline-heading" style={{ '--lane-count': dentists.length }}>

@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'apps.users',
     'apps.patients',
     'apps.appointments',
+    'apps.clinics',
 ]
 
 MIDDLEWARE = [
@@ -80,6 +81,9 @@ EMAIL_BACKEND = os.getenv(
     'django.core.mail.backends.console.EmailBackend',
 )
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'no-reply@dentalclinic.local')
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 ROOT_URLCONF = 'config.urls'
 

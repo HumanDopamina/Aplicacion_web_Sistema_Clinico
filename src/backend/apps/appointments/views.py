@@ -25,7 +25,7 @@ class AppointmentListCreateView(generics.ListCreateAPIView):
     }
 
     def get_queryset(self):
-        queryset = Appointment.objects.select_related("patient", "dentist", "created_by")
+        queryset = Appointment.objects.select_related("patient", "dentist", "created_by", "service")
         appointment_date = self.request.query_params.get("date")
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
@@ -49,7 +49,7 @@ class AppointmentListCreateView(generics.ListCreateAPIView):
 
 
 class AppointmentDetailView(generics.RetrieveUpdateAPIView):
-    queryset = Appointment.objects.select_related("patient", "dentist", "created_by")
+    queryset = Appointment.objects.select_related("patient", "dentist", "created_by", "service")
     serializer_class = AppointmentSerializer
     permission_classes = (IsAuthenticated, HasCapability)
     required_permissions = {

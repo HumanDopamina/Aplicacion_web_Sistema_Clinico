@@ -5,6 +5,8 @@ from rest_framework import serializers
 
 from apps.patients.models import Patient
 from apps.users.models import User
+from apps.clinics.availability import schedule_error
+from apps.clinics.models import ClinicService
 
 from .models import Appointment
 
@@ -52,6 +54,10 @@ def has_overlap(*, date, start_time, duration_minutes, dentist=None, patient=Non
 class AppointmentSerializer(serializers.ModelSerializer):
     patient = serializers.PrimaryKeyRelatedField(queryset=Patient.objects.all())
     dentist = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.all())
+    service = serializers.PrimaryKeyRelatedField(
+        queryset=ClinicService.objects.all(), required=False, allow_null=True,
+    )
+    service_name = serializers.CharField(source="service.name", read_only=True)
     patient_name = serializers.CharField(source="patient.full_name", read_only=True)
     patient_code = serializers.CharField(source="patient.code", read_only=True)
     dentist_name = serializers.SerializerMethodField()
@@ -62,13 +68,14 @@ class AppointmentSerializer(serializers.ModelSerializer):
         model = Appointment
         fields = (
             "id", "patient", "patient_name", "patient_code", "dentist", "dentist_name",
+            "service", "service_name",
             "date", "start_time", "end_time", "duration_minutes", "reason", "notes",
             "status", "status_display", "cancellation_reason", "created_by",
             "created_at", "updated_at",
         )
         read_only_fields = (
             "id", "patient_name", "patient_code", "dentist_name", "end_time",
-            "status_display", "created_by", "created_at", "updated_at",
+            "status_display", "service_name", "created_by", "created_at", "updated_at",
         )
 
     def get_dentist_name(self, appointment):
@@ -89,6 +96,18 @@ class AppointmentSerializer(serializers.ModelSerializer):
         if not reason:
             raise serializers.ValidationError("Indica el motivo de la cita.")
         return reason
+
+    def validate_service(self, service):
+        if service is None:
+            return service
+        if not service.is_active and (not self.instance or self.instance.service_id != service.pk):
+            raise serializers.ValidationError("Selecciona un servicio activo.")
+        return service
+
+    def validate_duration_minutes(self, value):
+        if value < 15 or value > 240 or value % 15:
+            raise serializers.ValidationError("La duración debe ser un bloque de 15 a 240 minutos.")
+        return value
 
     def validate(self, attrs):
         instance = self.instance
@@ -112,6 +131,9 @@ class AppointmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("La cita debe finalizar el mismo día.")
 
         if next_status != Appointment.Status.CANCELLED:
+            clinic_error = schedule_error(appointment_date, start_time, duration)
+            if clinic_error:
+                raise serializers.ValidationError(clinic_error)
             overlap_args = {
                 "date": appointment_date,
                 "start_time": start_time,
@@ -130,12 +152,19 @@ class AppointmentSerializer(serializers.ModelSerializer):
 class DentistAvailabilityQuerySerializer(serializers.Serializer):
     date = serializers.DateField()
     start_time = serializers.TimeField()
-    duration_minutes = serializers.ChoiceField(choices=Appointment.Duration.values)
+    duration_minutes = serializers.IntegerField(min_value=15, max_value=240)
     exclude_id = serializers.IntegerField(required=False, min_value=1)
 
     def validate(self, attrs):
+        if attrs["duration_minutes"] % 15:
+            raise serializers.ValidationError("La duración debe ser un bloque de 15 minutos.")
         if appointment_end_minutes(attrs["start_time"], attrs["duration_minutes"]) > 24 * 60:
             raise serializers.ValidationError("La cita debe finalizar el mismo día.")
+        clinic_error = schedule_error(
+            attrs["date"], attrs["start_time"], attrs["duration_minutes"],
+        )
+        if clinic_error:
+            raise serializers.ValidationError(clinic_error)
         return attrs
 
 

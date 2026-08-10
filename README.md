@@ -313,4 +313,6 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-13 y HU-18 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El sistema permite registrar y administrar expedientes, consultas clínicas, odontogramas versionados y una agenda diaria, semanal y mensual de citas con validación de disponibilidad. Documentos continúan en historias posteriores.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-13 y HU-18 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El sistema permite registrar y administrar expedientes, consultas clínicas, odontogramas versionados y una agenda diaria, semanal y mensual de citas con validación de disponibilidad.
+
+La configuración operativa permite personalizar el perfil y branding de la clínica, definir jornadas con pausas y festivos, y administrar servicios y tarifas. Estas reglas controlan la disponibilidad de citas y usan la zona horaria configurada para el dashboard y la agenda. Consulta el contrato completo en [`docs/clinic-configuration.md`](docs/clinic-configuration.md).

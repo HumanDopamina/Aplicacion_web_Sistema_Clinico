@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
 import logo from '../assets/logo_login.svg'
+import { useClinic } from '../context/clinicContextValue'
 
 const menuItems = [
   { to: '/bienvenida', label: 'Dashboard', icon: 'dashboard' },
@@ -24,10 +25,12 @@ function MenuIcon({ name }) {
 }
 
 export default function Sidebar() {
+  const { profile } = useClinic()
   return (
     <aside className="w-full shrink-0 border-b border-slate-200 bg-white px-4 py-4 md:min-h-screen md:w-56 md:border-b-0 md:border-r md:px-5 md:py-6">
       <div className="mb-4 flex items-center justify-between md:mb-7 md:block">
-        <img src={logo} alt="Dental Clinic" className="h-14 w-auto object-contain object-left md:h-24 md:max-w-40" />
+        <img src={profile.logo_url || logo} alt="Dental Clinic" className="h-14 w-auto object-contain object-left md:h-20 md:max-w-40" />
+        <strong className="hidden truncate font-serif text-lg text-slate-900 md:mt-1 md:block">{profile.name}</strong>
         <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 md:mt-1 md:block">Panel clínico</span>
       </div>
       <nav aria-label="Navegación principal">

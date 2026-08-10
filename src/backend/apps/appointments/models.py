@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 
@@ -12,12 +13,6 @@ class Appointment(models.Model):
         CANCELLED = "CANCELADA", "Cancelada"
         NO_SHOW = "NO_ASISTIO", "No asistió"
 
-    class Duration(models.IntegerChoices):
-        THIRTY = 30, "30 minutos"
-        FORTY_FIVE = 45, "45 minutos"
-        SIXTY = 60, "60 minutos"
-        NINETY = 90, "90 minutos"
-
     patient = models.ForeignKey(
         "patients.Patient",
         on_delete=models.PROTECT,
@@ -28,9 +23,18 @@ class Appointment(models.Model):
         on_delete=models.PROTECT,
         related_name="dental_appointments",
     )
+    service = models.ForeignKey(
+        "clinics.ClinicService",
+        on_delete=models.PROTECT,
+        related_name="appointments",
+        null=True,
+        blank=True,
+    )
     date = models.DateField()
     start_time = models.TimeField()
-    duration_minutes = models.PositiveSmallIntegerField(choices=Duration.choices)
+    duration_minutes = models.PositiveSmallIntegerField(
+        validators=(MinValueValidator(15), MaxValueValidator(240)),
+    )
     reason = models.CharField(max_length=240)
     notes = models.TextField(blank=True)
     status = models.CharField(
