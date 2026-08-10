@@ -8,12 +8,21 @@ from .views import (
     PatientConsultationDetailView,
     PatientConsultationListView,
     PatientDetailView,
+    PatientDocumentCategoryListView,
+    PatientDocumentContentView,
+    PatientDocumentDeleteView,
+    PatientDocumentListCreateView,
     PatientListCreateView,
 )
 
 
 urlpatterns = [
     path("", PatientListCreateView.as_view(), name="patient-list-create"),
+    path(
+        "document-categories/",
+        PatientDocumentCategoryListView.as_view(),
+        name="patient-document-categories",
+    ),
     path("<int:pk>/", PatientDetailView.as_view(), name="patient-detail"),
     path(
         "<int:pk>/consultations/",
@@ -44,5 +53,20 @@ urlpatterns = [
         "<int:patient_pk>/odontogram-versions/<int:pk>/",
         PatientOdontogramVersionDetailView.as_view(),
         name="patient-odontogram-version-detail",
+    ),
+    path(
+        "<int:patient_pk>/documents/",
+        PatientDocumentListCreateView.as_view(),
+        name="patient-document-list-create",
+    ),
+    path(
+        "<int:patient_pk>/documents/<int:pk>/",
+        PatientDocumentDeleteView.as_view(),
+        name="patient-document-delete",
+    ),
+    path(
+        "<int:patient_pk>/documents/<int:pk>/content/",
+        PatientDocumentContentView.as_view(),
+        name="patient-document-content",
     ),
 ]

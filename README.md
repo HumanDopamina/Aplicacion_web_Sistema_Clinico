@@ -289,6 +289,15 @@ El administrador gestiona `consultations.view`, `consultations.create` y `consul
 
 Cada nueva consulta hereda el odontograma más reciente del paciente. Las versiones anteriores no pueden editarse ni eliminarse. Si otra persona guarda una revisión mientras el odontograma está abierto, la API responde `409`; el borrador se conserva hasta que el profesional decida cargar la última versión.
 
+### Documentos clínicos del paciente
+
+1. Abre un expediente y selecciona **Documentos**.
+2. Busca por nombre, notas o categoría, o filtra usando las categorías normalizadas que ya utiliza la clínica.
+3. Selecciona **Adjuntar documentos** para cargar hasta 10 archivos PDF, JPG, PNG o WebP con categoría, fecha y notas comunes.
+4. Abre un documento para previsualizarlo de forma autenticada, descargarlo con su nombre original o eliminarlo si tu rol tiene `documents.delete`.
+
+Los archivos se guardan fuera del directorio público con nombres UUID; la API nunca expone su ruta física. Cada archivo admite hasta 10 MB y cada lote hasta 50 MB. Recepción y Odontología obtienen `documents.view` y `documents.create` por defecto; el borrado físico no se asigna por defecto, requiere confirmación y no puede recuperarse. Un paciente inactivo conserva vista previa y descarga, pero su archivo clínico pasa a modo de solo lectura. Consulta la operación y el contrato completo en [`docs/patient-documents.md`](docs/patient-documents.md).
+
 ### Agenda de citas
 
 1. Abre **Citas** y elige la vista diaria, semanal o mensual según el nivel de detalle que necesites.
@@ -296,7 +305,7 @@ Cada nueva consulta hereda el odontograma más reciente del paciente. Las versio
 3. La agenda impide que un paciente u odontólogo ocupe intervalos solapados; las citas adyacentes sí están permitidas.
 4. Selecciona una tarjeta para editarla, confirmarla, completarla, cancelarla o registrar una inasistencia según su estado y tus permisos.
 
-La agenda utiliza `appointments.view`, `appointments.create` y `appointments.edit`. Recepción obtiene los tres permisos por defecto, Odontología conserva visualización y Administración mantiene acceso completo. La vista semanal distribuye siete días y la mensual resume la ocupación del mes; ambas permiten abrir directamente la agenda diaria. Las citas canceladas permanecen en el calendario para trazabilidad, pero dejan libre su intervalo.
+La agenda utiliza `appointments.view`, `appointments.create` y `appointments.edit`; `appointments.view_all` amplía el alcance a las citas de todo el equipo. Recepción recibe los cuatro permisos por defecto, Odontología conserva visualización únicamente de sus propias citas y Administración mantiene acceso completo implícito. Este alcance se aplica en el dashboard, las vistas diaria, semanal y mensual, el detalle y la disponibilidad. Las citas canceladas permanecen en el calendario para trazabilidad, pero dejan libre su intervalo.
 
 ## Consideraciones para producción
 
@@ -313,6 +322,6 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-13 y HU-18 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El sistema permite registrar y administrar expedientes, consultas clínicas, odontogramas versionados y una agenda diaria, semanal y mensual de citas con validación de disponibilidad.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-13 y HU-18 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El sistema permite registrar y administrar expedientes, consultas clínicas, odontogramas versionados, documentos privados del paciente y una agenda diaria, semanal y mensual de citas con validación de disponibilidad.
 
 La configuración operativa permite personalizar el perfil y branding de la clínica, definir jornadas con pausas y festivos, y administrar servicios y tarifas. Estas reglas controlan la disponibilidad de citas y usan la zona horaria configurada para el dashboard y la agenda. Consulta el contrato completo en [`docs/clinic-configuration.md`](docs/clinic-configuration.md).

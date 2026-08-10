@@ -17,6 +17,7 @@ import Navbar from './components/Navbar'
 import Sidebar from './components/Sidebar'
 
 const AppointmentsPage = lazy(() => import('./pages/Appointments/AppointmentsPage'))
+const PatientDocumentsPage = lazy(() => import('./pages/Patients/PatientDocumentsPage'))
 
 function ProtectedLayout({ children, allowedRoles, requiredPermission }) {
   const { user } = useAuth()
@@ -57,6 +58,7 @@ export default function App() {
     <Route path="/pacientes/:patientId/consultas/:consultationId" element={<ProtectedLayout requiredPermission="consultations.view"><ConsultationRecordPage /></ProtectedLayout>} />
     <Route path="/pacientes/:patientId/consultas" element={<ProtectedLayout requiredPermission="consultations.view"><PatientConsultationsPage /></ProtectedLayout>} />
     <Route path="/pacientes/:patientId/odontogramas" element={<ProtectedLayout requiredPermission="consultations.view"><PatientOdontogramHistoryPage /></ProtectedLayout>} />
+    <Route path="/pacientes/:patientId/documentos" element={<ProtectedLayout requiredPermission="documents.view"><Suspense fallback={<p className="text-sm text-slate-500">Cargando documentos…</p>}><PatientDocumentsPage /></Suspense></ProtectedLayout>} />
     <Route path="/pacientes/:id" element={<ProtectedLayout requiredPermission="patients.view"><PatientRecordPage /></ProtectedLayout>} />
     <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Clínicas" /></ProtectedLayout>} />
     <Route path="/citas" element={<ProtectedLayout requiredPermission="appointments.view"><Suspense fallback={<p className="text-sm text-slate-500">Cargando agenda…</p>}><AppointmentsPage /></Suspense></ProtectedLayout>} />

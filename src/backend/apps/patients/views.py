@@ -1,12 +1,16 @@
-from django.http import Http404
+from django.db.models import Q
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.utils.http import content_disposition_header
 from rest_framework import filters, generics, status
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.users.permissions import HasCapability
 
-from .models import Consultation, OdontogramVersion, Patient
+from .models import Consultation, OdontogramVersion, Patient, PatientDocument
 from .odontograms import OdontogramConflict
 from .serializers import (
     ConsultationSerializer,
@@ -14,6 +18,8 @@ from .serializers import (
     OdontogramVersionSerializer,
     OdontogramVersionSummarySerializer,
     PatientSerializer,
+    PatientDocumentBatchUploadSerializer,
+    PatientDocumentSerializer,
 )
 
 
@@ -184,3 +190,113 @@ class PatientOdontogramVersionDetailView(generics.RetrieveAPIView):
         return OdontogramVersion.objects.select_related(
             "consultation", "created_by"
         ).filter(patient_id=self.kwargs["patient_pk"])
+
+
+class PatientDocumentListCreateView(APIView):
+    permission_classes = (IsAuthenticated, HasCapability)
+    parser_classes = (MultiPartParser, FormParser)
+    required_permissions = {
+        "GET": "documents.view",
+        "POST": "documents.create",
+    }
+
+    def get_patient(self):
+        return get_object_or_404(Patient, pk=self.kwargs["patient_pk"])
+
+    def get(self, request, patient_pk):
+        self.get_patient()
+        queryset = PatientDocument.objects.select_related("uploaded_by").filter(
+            patient_id=patient_pk,
+        )
+        category = request.query_params.get("category", "").strip()
+        search = request.query_params.get("search", "").strip()
+        if category:
+            queryset = queryset.filter(category__iexact=category)
+        if search:
+            queryset = queryset.filter(
+                Q(original_name__icontains=search)
+                | Q(category__icontains=search)
+                | Q(notes__icontains=search)
+            )
+        return Response(PatientDocumentSerializer(queryset, many=True).data)
+
+    def post(self, request, patient_pk):
+        patient = self.get_patient()
+        if not patient.is_active:
+            return Response(
+                {"detail": "El paciente está inactivo; sus documentos son de solo lectura."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = PatientDocumentBatchUploadSerializer(
+            data=request.data,
+            context={"request": request, "patient": patient},
+        )
+        serializer.is_valid(raise_exception=True)
+        documents = serializer.save()
+        return Response(
+            PatientDocumentSerializer(
+                documents,
+                many=True,
+                context={"request": request},
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PatientDocumentDeleteView(APIView):
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"DELETE": "documents.delete"}
+
+    def delete(self, request, patient_pk, pk):
+        patient = get_object_or_404(Patient, pk=patient_pk)
+        document = get_object_or_404(PatientDocument, pk=pk, patient=patient)
+        if not patient.is_active:
+            return Response(
+                {"detail": "El paciente está inactivo; sus documentos son de solo lectura."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        storage = document.file.storage
+        stored_name = document.file.name
+        document.delete()
+        if stored_name:
+            storage.delete(stored_name)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PatientDocumentContentView(APIView):
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "documents.view"}
+
+    def get(self, request, patient_pk, pk):
+        document = get_object_or_404(
+            PatientDocument,
+            pk=pk,
+            patient_id=patient_pk,
+        )
+        as_attachment = request.query_params.get("download", "").lower() == "true"
+        response = FileResponse(
+            document.file.open("rb"),
+            content_type=document.mime_type,
+        )
+        response["Content-Disposition"] = content_disposition_header(
+            as_attachment,
+            document.original_name,
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
+
+
+class PatientDocumentCategoryListView(APIView):
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "documents.view"}
+
+    def get(self, request):
+        categories = PatientDocument.objects.order_by("category").values_list(
+            "category",
+            flat=True,
+        )
+        unique = {}
+        for category in categories:
+            unique.setdefault(category.casefold(), category)
+        return Response(sorted(unique.values(), key=str.casefold))

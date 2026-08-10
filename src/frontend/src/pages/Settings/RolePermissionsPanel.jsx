@@ -43,9 +43,15 @@ export default function RolePermissionsPanel({ accessToken }) {
 
   const togglePermission = (code) => {
     setSelectedPermissions((current) => {
-      const next = current.includes(code)
+      let next = current.includes(code)
         ? current.filter((permission) => permission !== code)
         : [...current, code]
+      if (code === 'appointments.view' && current.includes(code)) {
+        next = next.filter((permission) => permission !== 'appointments.view_all')
+      }
+      if (code === 'appointments.view_all' && !current.includes(code)) {
+        next = [...next, 'appointments.view']
+      }
       return catalog.filter((permission) => next.includes(permission.code)).map(({ code: value }) => value)
     })
     setNotice('')

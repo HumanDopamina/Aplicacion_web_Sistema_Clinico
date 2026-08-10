@@ -138,6 +138,25 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('No hay citas programadas para hoy.')).not.toBeInTheDocument()
   })
 
+  it('labels a restricted dentist dashboard as their personal agenda', async () => {
+    render(
+      <MemoryRouter>
+        <DashboardPage
+          user={{
+            id: 8,
+            first_name: 'Paul',
+            role: 'ODONTOLOGO',
+            permissions: ['appointments.view'],
+          }}
+          accessToken="access-token"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByText('Tu agenda del día')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ver mi agenda →' })).toHaveAttribute('href', '/citas')
+  })
+
   it('opens the appointments module from the new appointment action', () => {
     render(
       <MemoryRouter>

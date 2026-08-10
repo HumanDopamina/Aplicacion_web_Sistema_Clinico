@@ -41,6 +41,8 @@ export default function DashboardPage({ user, accessToken }) {
   const canViewPatients = user?.role === 'ADMINISTRADOR' || user?.permissions?.includes('patients.view')
   const canCreateAppointment = user?.role === 'ADMINISTRADOR' || user?.permissions?.includes('appointments.create')
   const canViewAppointments = user?.role === 'ADMINISTRADOR' || user?.permissions?.includes('appointments.view')
+  const canViewTeamAppointments = user?.role === 'ADMINISTRADOR' || user?.permissions?.includes('appointments.view_all')
+  const hasPersonalAgenda = canViewAppointments && !canViewTeamAppointments
 
   useEffect(() => {
     if (!canViewPatients) {
@@ -98,8 +100,8 @@ export default function DashboardPage({ user, accessToken }) {
       <section className="grid min-h-80 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)]">
         <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-            <div><h2 className="font-semibold text-slate-900">Citas de hoy</h2><p className="text-xs text-slate-400">Agenda del día</p></div>
-            <a href="/citas" className="text-xs font-semibold text-blue-700 no-underline hover:underline">Ver todas →</a>
+            <div><h2 className="font-semibold text-slate-900">Citas de hoy</h2><p className="text-xs text-slate-400">{hasPersonalAgenda ? 'Tu agenda del día' : 'Agenda del día'}</p></div>
+            <a href="/citas" className="text-xs font-semibold text-blue-700 no-underline hover:underline">{hasPersonalAgenda ? 'Ver mi agenda →' : 'Ver todas →'}</a>
           </div>
           {appointmentsLoading ? <div className="grid min-h-56 place-content-center px-6 py-10 text-center"><p className="text-sm text-slate-500">Cargando citas…</p></div> : null}
           {!appointmentsLoading && appointmentsError ? <div className="grid min-h-56 place-content-center px-6 py-10 text-center"><p role="alert" className="text-sm text-red-700">{appointmentsError}</p></div> : null}

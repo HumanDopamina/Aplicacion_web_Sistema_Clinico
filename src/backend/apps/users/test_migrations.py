@@ -34,3 +34,43 @@ class AppointmentEditPermissionMigrationTests(TransactionTestCase):
             permissions,
             ["appointments.view", "appointments.create", "appointments.edit"],
         )
+
+
+class AppointmentViewAllPermissionMigrationTests(TransactionTestCase):
+    migrate_from = ("users", "0007_document_permissions")
+    migrate_to = ("users", "0008_appointment_view_all_permission")
+
+    def setUp(self):
+        super().setUp()
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate([self.migrate_from])
+        old_apps = self.executor.loader.project_state([self.migrate_from]).apps
+        preset_model = old_apps.get_model("users", "RolePermissionPreset")
+        preset_model.objects.update_or_create(
+            role="RECEPCIONISTA",
+            defaults={"permissions": ["appointments.view", "appointments.create"]},
+        )
+        preset_model.objects.update_or_create(
+            role="ODONTOLOGO",
+            defaults={"permissions": ["appointments.view"]},
+        )
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        super().tearDown()
+
+    def test_adds_view_all_to_reception_only(self):
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate([self.migrate_to])
+        new_apps = self.executor.loader.project_state([self.migrate_to]).apps
+        preset_model = new_apps.get_model("users", "RolePermissionPreset")
+
+        reception = preset_model.objects.get(role="RECEPCIONISTA").permissions
+        dentist = preset_model.objects.get(role="ODONTOLOGO").permissions
+
+        self.assertEqual(
+            reception,
+            ["appointments.view", "appointments.create", "appointments.view_all"],
+        )
+        self.assertEqual(dentist, ["appointments.view"])

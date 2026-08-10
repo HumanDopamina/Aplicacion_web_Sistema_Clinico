@@ -46,8 +46,12 @@ class LoginApiTests(APITestCase):
                 "consultations.create",
                 "consultations.edit",
                 "appointments.view",
+                "appointments.view_all",
                 "appointments.create",
                 "appointments.edit",
+                "documents.view",
+                "documents.create",
+                "documents.delete",
             ],
         )
         self.assertNotIn("password", response.data["user"])
@@ -610,8 +614,12 @@ class RolePermissionPresetApiTests(APITestCase):
                 "consultations.create",
                 "consultations.edit",
                 "appointments.view",
+                "appointments.view_all",
                 "appointments.create",
                 "appointments.edit",
+                "documents.view",
+                "documents.create",
+                "documents.delete",
             ],
         )
         self.assertEqual(
@@ -636,6 +644,18 @@ class RolePermissionPresetApiTests(APITestCase):
                 "permissions": ["patients.view", "patients.create"],
             },
         )
+
+    def test_view_all_requires_the_base_appointment_view_permission(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.ODONTOLOGO}/",
+            {"permissions": ["appointments.view_all"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("appointments.view_all", str(response.data))
 
     def test_hu09_effective_permissions_follow_the_global_role_preset(self):
         self.client.force_authenticate(self.admin)

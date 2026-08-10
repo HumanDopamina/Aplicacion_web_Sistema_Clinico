@@ -26,7 +26,7 @@ function errorMessage(data) {
   return firstError(data) || 'No fue posible procesar la solicitud.'
 }
 
-export async function apiRequest(path, options = {}) {
+async function authenticatedResponse(path, options = {}) {
   const { _retried, ...requestOptions } = options
   const currentAccess = options.headers?.Authorization && storedSession()?.session?.access
   const contentHeaders = options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }
@@ -38,15 +38,20 @@ export async function apiRequest(path, options = {}) {
       ...(currentAccess ? { Authorization: `Bearer ${currentAccess}` } : {}),
     },
   })
-  const data = await response.json().catch(() => ({}))
   if (response.status === 401 && options.headers?.Authorization && !_retried) {
     const access = await renewAccessToken()
-    return apiRequest(path, {
+    return authenticatedResponse(path, {
       ...options,
       _retried: true,
       headers: { ...options.headers, Authorization: `Bearer ${access}` },
     })
   }
+  return response
+}
+
+export async function apiRequest(path, options = {}) {
+  const response = await authenticatedResponse(path, options)
+  const data = await response.json().catch(() => ({}))
   if (!response.ok) {
     const error = new Error(errorMessage(data))
     error.status = response.status
@@ -54,6 +59,18 @@ export async function apiRequest(path, options = {}) {
     throw error
   }
   return data
+}
+
+export async function apiBlobRequest(path, options = {}) {
+  const response = await authenticatedResponse(path, options)
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    const error = new Error(errorMessage(data))
+    error.status = response.status
+    error.data = data
+    throw error
+  }
+  return response.blob()
 }
 
 function storedSession() {
