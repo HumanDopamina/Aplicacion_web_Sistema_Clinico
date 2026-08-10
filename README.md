@@ -198,6 +198,7 @@ Los enlaces de recuperación:
 | `POST` | `/api/patients/` | `patients.create` | Registra un paciente, genera su código y crea `clinical_record`. |
 | `GET` | `/api/patients/{id}/` | `patients.view` | Abre la identidad y el expediente clínico completo. |
 | `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza datos personales y el expediente clínico anidado. |
+| `GET` | `/api/patients/consultations/recent/` | `consultations.view` | Devuelve hasta cuatro consultas recientes; `consultations.view_all` amplía el resumen a todo el equipo. |
 | `GET` | `/api/patients/{id}/consultations/` | `consultations.view` | Lista las consultas del paciente por fecha descendente. |
 | `POST` | `/api/patients/{id}/consultations/` | `consultations.create` | Registra una consulta y asigna el profesional autenticado. |
 | `GET` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.view` | Abre la ficha clínica completa de la consulta. |
@@ -277,7 +278,9 @@ Para editar el expediente, el administrador debe otorgar `patients.edit` desde *
 
 La pestaña **Consultas** muestra el historial clínico persistido del paciente en orden descendente por fecha. Cada registro identifica el tipo, profesional, resumen y estado. **Nueva consulta** abre una ficha completa con el mismo comportamiento de edición directa: fecha/hora actuales y estado **En progreso**, nube para guardar, X para descartar y advertencia al abandonar cambios pendientes.
 
-El administrador gestiona `consultations.view`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
+El administrador gestiona `consultations.view`, `consultations.view_all`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. `consultations.view_all` no se asigna por defecto y amplía únicamente el resumen de consultas recientes del dashboard a todo el equipo. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
+
+En el dashboard, Odontología ve sus cuatro consultas más recientes en lugar de **Pacientes recientes**. Administración ve consultas generales y pacientes recientes en tarjetas apiladas. Recepción conserva pacientes recientes y solo incorpora el resumen general de consultas cuando su preset incluye `consultations.view_all`.
 
 ### Odontogramas por consulta
 

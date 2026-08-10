@@ -233,4 +233,8 @@ class RolePermissionPresetSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "appointments.view_all requiere el permiso appointments.view.",
             )
+        if "consultations.view_all" in permissions and "consultations.view" not in permissions:
+            raise serializers.ValidationError(
+                "consultations.view_all requiere el permiso consultations.view.",
+            )
         return permissions

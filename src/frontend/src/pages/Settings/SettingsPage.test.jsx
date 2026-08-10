@@ -38,6 +38,10 @@ const fillForm = () => {
   fireEvent.change(screen.getByLabelText('Confirmar contraseña'), { target: { value: 'ContraseñaSegura123!' } })
 }
 
+const openStaff = () => {
+  fireEvent.click(screen.getByRole('button', { name: /Gestión de Staff/ }))
+}
+
 describe('SettingsPage staff management', () => {
   beforeEach(() => {
     clinicService.getClinicOptions.mockResolvedValue({
@@ -71,6 +75,8 @@ describe('SettingsPage staff management', () => {
         { code: 'patients.view', label: 'Ver pacientes', group: 'Pacientes' },
         { code: 'patients.create', label: 'Registrar pacientes', group: 'Pacientes' },
         { code: 'patients.edit', label: 'Editar pacientes', group: 'Pacientes' },
+        { code: 'consultations.view', label: 'Ver consultas', group: 'Consultas' },
+        { code: 'consultations.view_all', label: 'Ver consultas de todo el equipo', group: 'Consultas' },
         { code: 'appointments.view', label: 'Ver citas', group: 'Citas' },
         { code: 'appointments.view_all', label: 'Ver citas de todo el equipo', group: 'Citas' },
         { code: 'appointments.create', label: 'Crear citas', group: 'Citas' },
@@ -91,8 +97,18 @@ describe('SettingsPage staff management', () => {
     vi.clearAllMocks()
   })
 
+  it('opens with the clinic profile selected', async () => {
+    renderPage()
+
+    expect(screen.getByRole('button', { name: /Perfil de la clínica/ })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: /Gestión de Staff/ })).not.toHaveAttribute('aria-current')
+    expect(await screen.findByRole('heading', { name: 'Perfil de la clínica' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Gestión de Staff' })).not.toBeInTheDocument()
+  })
+
   it('shows an empty state when no staff users exist', async () => {
     renderPage()
+    openStaff()
 
     expect(await screen.findByText('Aún no hay miembros registrados.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Añadir miembro' })).toBeInTheDocument()
@@ -100,7 +116,6 @@ describe('SettingsPage staff management', () => {
 
   it('opens operational panels only when selected and saves the clinic profile', async () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: /Perfil de la clínica/ }))
     expect(await screen.findByRole('heading', { name: 'Perfil de la clínica' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Nombre de la clínica'), { target: { value: 'Clínica Argüello' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
@@ -133,6 +148,7 @@ describe('SettingsPage staff management', () => {
       },
     ])
     renderPage()
+    openStaff()
 
     expect(await screen.findByText('Ana Pérez')).toBeInTheDocument()
     expect(screen.getByText('Bruno López')).toBeInTheDocument()
@@ -178,8 +194,24 @@ describe('SettingsPage staff management', () => {
     expect(screen.getByLabelText('Ver citas de todo el equipo')).not.toBeChecked()
   })
 
+  it('keeps team consultation visibility dependent on base consultation access', async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: /Permisos por rol/ }))
+    expect(await screen.findByLabelText('Ver consultas de todo el equipo')).not.toBeChecked()
+
+    fireEvent.click(screen.getByLabelText('Ver consultas de todo el equipo'))
+    expect(screen.getByLabelText('Ver consultas')).toBeChecked()
+    expect(screen.getByLabelText('Ver consultas de todo el equipo')).toBeChecked()
+
+    fireEvent.click(screen.getByLabelText('Ver consultas'))
+    expect(screen.getByLabelText('Ver consultas')).not.toBeChecked()
+    expect(screen.getByLabelText('Ver consultas de todo el equipo')).not.toBeChecked()
+  })
+
   it('registers a member and adds it to the staff list', async () => {
     renderPage()
+    openStaff()
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir miembro' }))
     fillForm()
 
@@ -202,6 +234,7 @@ describe('SettingsPage staff management', () => {
       new Error('Ya existe un usuario con este correo electrónico.'),
     )
     renderPage()
+    openStaff()
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir miembro' }))
     fillForm()
 
@@ -231,6 +264,7 @@ describe('SettingsPage staff management', () => {
       is_active: true,
     })
     renderPage()
+    openStaff()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
     expect(screen.getByRole('dialog', { name: 'Editar miembro' })).toBeInTheDocument()
@@ -261,6 +295,7 @@ describe('SettingsPage staff management', () => {
       is_active: true,
     }])
     renderPage()
+    openStaff()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
     fireEvent.click(screen.getByLabelText('Usuario activo'))

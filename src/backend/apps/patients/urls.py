@@ -13,6 +13,7 @@ from .views import (
     PatientDocumentDeleteView,
     PatientDocumentListCreateView,
     PatientListCreateView,
+    RecentConsultationListView,
 )
 
 
@@ -22,6 +23,11 @@ urlpatterns = [
         "document-categories/",
         PatientDocumentCategoryListView.as_view(),
         name="patient-document-categories",
+    ),
+    path(
+        "consultations/recent/",
+        RecentConsultationListView.as_view(),
+        name="recent-consultation-list",
     ),
     path("<int:pk>/", PatientDetailView.as_view(), name="patient-detail"),
     path(

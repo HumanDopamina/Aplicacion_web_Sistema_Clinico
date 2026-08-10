@@ -176,6 +176,29 @@ class ConsultationSerializer(serializers.ModelSerializer):
             return consultation
 
 
+class RecentConsultationSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source="patient.full_name", read_only=True)
+    patient_code = serializers.CharField(source="patient.code", read_only=True)
+    professional_name = serializers.CharField(
+        source="professional_name_snapshot",
+        read_only=True,
+    )
+    consultation_type_display = serializers.CharField(
+        source="get_consultation_type_display",
+        read_only=True,
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = Consultation
+        fields = (
+            "id", "patient", "patient_name", "patient_code", "professional_name",
+            "date", "time", "consultation_type", "consultation_type_display",
+            "status", "status_display",
+        )
+        read_only_fields = fields
+
+
 class OdontogramVersionSerializer(serializers.ModelSerializer):
     professional_name = serializers.SerializerMethodField()
     consultation_date = serializers.DateField(source="consultation.date", read_only=True)

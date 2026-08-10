@@ -8,7 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.users.permissions import HasCapability
+from apps.users.permissions import HasCapability, user_has_permission
 
 from .models import Consultation, OdontogramVersion, Patient, PatientDocument
 from .odontograms import OdontogramConflict
@@ -20,6 +20,7 @@ from .serializers import (
     PatientSerializer,
     PatientDocumentBatchUploadSerializer,
     PatientDocumentSerializer,
+    RecentConsultationSerializer,
 )
 
 
@@ -59,6 +60,18 @@ class PatientDetailView(generics.RetrieveUpdateAPIView):
 
 def professional_display_name(user):
     return user.get_full_name().strip() or user.email
+
+
+class RecentConsultationListView(generics.ListAPIView):
+    serializer_class = RecentConsultationSerializer
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "consultations.view"}
+
+    def get_queryset(self):
+        queryset = Consultation.objects.select_related("patient", "professional")
+        if not user_has_permission(self.request.user, "consultations.view_all"):
+            queryset = queryset.filter(professional=self.request.user)
+        return queryset.order_by("-date", "-time", "-created_at")[:4]
 
 
 class PatientConsultationListView(generics.ListCreateAPIView):

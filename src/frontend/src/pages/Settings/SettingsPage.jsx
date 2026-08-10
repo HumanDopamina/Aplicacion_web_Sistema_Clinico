@@ -125,7 +125,7 @@ export default function SettingsPage() {
   const [loadError, setLoadError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
-  const [activeSection, setActiveSection] = useState('Gestión de Staff')
+  const [activeSection, setActiveSection] = useState('Perfil de la clínica')
 
   useEffect(() => {
     let active = true

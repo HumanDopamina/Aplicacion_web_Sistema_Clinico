@@ -4,7 +4,7 @@
 
 **Historia:** Como recepcionista, quiero registrar nuevos pacientes, para crear su expediente clínico.
 
-**Estado:** Implementada y validada el 8 de agosto de 2026.
+**Estado:** Implementada y validada el 10 de agosto de 2026.
 
 ## Criterio de aceptación
 
@@ -15,7 +15,8 @@
 - La recepcionista con el permiso `patients.create` puede abrir **Nuevo paciente** desde `/pacientes` o el dashboard; ambas acciones navegan a `/pacientes/nuevo`.
 - Alta, visualización y edición usan una sola vista principal inspirada en Odoo: conservan el encabezado, las tarjetas, la distribución y las tabs **Resumen clínico**, **Consultas**, **Odontograma** y **Documentos**.
 - `/pacientes/nuevo` activa `isNew=true`; `/pacientes/{id}` carga el mismo componente con un borrador basado en la última versión persistida.
-- El dashboard consulta el mismo listado persistido que `/pacientes`, actualiza el total y muestra hasta los cuatro registros más recientes con acceso directo a su expediente.
+- El dashboard consulta el mismo listado persistido que `/pacientes`, actualiza el total y muestra hasta los cuatro registros más recientes con acceso directo a su expediente para Administración y Recepción.
+- Odontología sustituye **Pacientes recientes** por sus cuatro consultas más recientes. Administración ve consultas de todo el equipo y Recepción puede habilitar ese resumen general mediante `consultations.view_all`.
 - El resumen reúne exclusivamente los datos permanentes del paciente y sus antecedentes familiares, infectocontagiosos y hereditarios.
 - Los datos propios de una atención —profesional, fecha, motivo, anamnesis, interrogatorio, examen físico, diagnóstico, plan, presupuesto y tratamiento— se capturan exclusivamente desde **Consultas** y no se repiten en **Resumen clínico**.
 - **Resumen clínico** no muestra ni edita una tarjeta de archivos clínicos. Radiografías, fotografías y demás adjuntos se gestionarán exclusivamente desde la pestaña **Documentos**.
@@ -46,6 +47,8 @@
 - `POST /api/patients/` requiere `patients.create`.
 - `PATCH /api/patients/{id}/` requiere `patients.edit`; ocultar **Editar** sin permiso es solamente una protección adicional de interfaz.
 - El administrador mantiene acceso implícito; los demás roles heredan los presets configurados en HU-09.
+- `GET /api/patients/consultations/recent/` requiere `consultations.view`; sin `consultations.view_all` filtra por el profesional autenticado y nunca confía en un identificador enviado por el cliente.
+- `consultations.view_all` afecta únicamente el resumen del dashboard; los historiales y detalles existentes conservan su alcance actual.
 - La autorización se valida en backend, independientemente de que la interfaz oculte el botón de creación.
 
 ## Interfaces públicas
@@ -56,6 +59,7 @@
 | `POST` | `/api/patients/` | `patients.create` | Registra `Patient` y su objeto anidado `clinical_record`. |
 | `GET` | `/api/patients/{id}/` | `patients.view` | Devuelve la identidad y el expediente clínico completo. |
 | `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza datos permanentes y el objeto `clinical_record`. |
+| `GET` | `/api/patients/consultations/recent/` | `consultations.view` | Devuelve hasta cuatro consultas propias; con `consultations.view_all`, devuelve las del equipo. |
 | `GET` | `/api/patients/{id}/consultations/` | `consultations.view` | Lista el historial persistido de consultas, de más reciente a más antiguo. |
 | `POST` | `/api/patients/{id}/consultations/` | `consultations.create` | Registra una consulta y asigna paciente/profesional desde la ruta y sesión. |
 | `GET` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.view` | Devuelve la ficha clínica completa de una consulta del paciente indicado. |
@@ -66,11 +70,11 @@
 - Backend `[HU-10]`: creación transaccional del paciente y expediente completo, apertura del detalle, código automático, persistencia, búsqueda, permisos editables, acceso administrativo, fecha futura, duplicidad de cédula y campos internos de solo lectura.
 - Frontend `[HU-10]`: una sola vista cubre `isNew`, edición inmediata por permiso, detección de cambios, `POST`, `PATCH`, descarte, errores y protección de navegación conservando estructura y tabs. Las pruebas garantizan que el resumen no renderice ni envíe campos propios de una consulta.
 - Cliente API: una prueba de regresión comprueba que los errores anidados del expediente se presentan de forma legible.
-- Dashboard: la acción rápida abre `/pacientes/nuevo` y queda protegida por `patients.create`; el total y los pacientes recientes se cargan desde `GET /api/patients/`.
+- Dashboard: las acciones rápidas respetan capacidades; el total y los pacientes recientes se cargan desde `GET /api/patients/`, mientras el resumen de consultas usa un endpoint compacto con alcance personal/general validado en backend.
 - Servicio frontend: listado/búsqueda, creación y detalle con autenticación Bearer.
 - Edición: permiso configurable, rechazo `403`, campos técnicos inmutables, formulario precargado, `PATCH` y actualización visible.
-- Consultas backend: creación completa, metadatos obligatorios, profesional automático, propiedad inmutable, alcance por paciente, permisos separados, edición de completadas y rechazo de eliminación.
-- Consultas frontend: rutas de historial/alta/detalle, acciones por capacidad, valores iniciales, todos los grupos clínicos, `POST`, `PATCH`, descarte, errores, modo lectura, bloqueo de navegación y tabla/tarjetas responsivas.
+- Consultas backend: creación completa, metadatos obligatorios, profesional automático, propiedad inmutable, alcance por paciente, resumen reciente limitado y filtrado, permisos separados, edición de completadas y rechazo de eliminación.
+- Consultas frontend: rutas de historial/alta/detalle, resumen reciente por rol y capacidad, acciones por capacidad, valores iniciales, todos los grupos clínicos, `POST`, `PATCH`, descarte, errores, modo lectura, bloqueo de navegación y tabla/tarjetas responsivas.
 
 ## Decisiones de alcance
 
