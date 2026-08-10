@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/authContextValue'
 import LoginPage from './pages/Auth/LoginPage'
@@ -14,6 +15,8 @@ import ConsultationOdontogramPage from './pages/Patients/ConsultationOdontogramP
 import PatientOdontogramHistoryPage from './pages/Patients/PatientOdontogramHistoryPage'
 import Navbar from './components/Navbar'
 import Sidebar from './components/Sidebar'
+
+const AppointmentsPage = lazy(() => import('./pages/Appointments/AppointmentsPage'))
 
 function ProtectedLayout({ children, allowedRoles, requiredPermission }) {
   const { user } = useAuth()
@@ -56,7 +59,7 @@ export default function App() {
     <Route path="/pacientes/:patientId/odontogramas" element={<ProtectedLayout requiredPermission="consultations.view"><PatientOdontogramHistoryPage /></ProtectedLayout>} />
     <Route path="/pacientes/:id" element={<ProtectedLayout requiredPermission="patients.view"><PatientRecordPage /></ProtectedLayout>} />
     <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Clínicas" /></ProtectedLayout>} />
-    <Route path="/citas" element={<ProtectedLayout><ModulePage title="Citas" /></ProtectedLayout>} />
+    <Route path="/citas" element={<ProtectedLayout requiredPermission="appointments.view"><Suspense fallback={<p className="text-sm text-slate-500">Cargando agenda…</p>}><AppointmentsPage /></Suspense></ProtectedLayout>} />
     <Route path="/configuracion" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><SettingsPage /></ProtectedLayout>} />
     <Route path="*" element={<Navigate to="/login" replace />} />
   </Routes>

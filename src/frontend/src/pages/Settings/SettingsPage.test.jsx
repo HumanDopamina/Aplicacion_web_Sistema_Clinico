@@ -56,9 +56,10 @@ describe('SettingsPage staff management', () => {
         { code: 'patients.edit', label: 'Editar pacientes', group: 'Pacientes' },
         { code: 'appointments.view', label: 'Ver citas', group: 'Citas' },
         { code: 'appointments.create', label: 'Crear citas', group: 'Citas' },
+        { code: 'appointments.edit', label: 'Editar citas', group: 'Citas' },
       ],
       presets: [
-        { role: 'RECEPCIONISTA', permissions: ['patients.view', 'patients.create', 'patients.edit', 'appointments.view', 'appointments.create'] },
+        { role: 'RECEPCIONISTA', permissions: ['patients.view', 'patients.create', 'patients.edit', 'appointments.view', 'appointments.create', 'appointments.edit'] },
         { role: 'ODONTOLOGO', permissions: ['patients.view', 'appointments.view'] },
       ],
     })

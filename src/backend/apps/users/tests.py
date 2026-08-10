@@ -47,6 +47,7 @@ class LoginApiTests(APITestCase):
                 "consultations.edit",
                 "appointments.view",
                 "appointments.create",
+                "appointments.edit",
             ],
         )
         self.assertNotIn("password", response.data["user"])
@@ -610,6 +611,7 @@ class RolePermissionPresetApiTests(APITestCase):
                 "consultations.edit",
                 "appointments.view",
                 "appointments.create",
+                "appointments.edit",
             ],
         )
         self.assertEqual(
