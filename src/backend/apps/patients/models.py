@@ -3,6 +3,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from .identifiers import normalize_national_id
+from .documents import patient_document_path, private_document_storage
 
 
 class Patient(models.Model):
@@ -281,3 +282,41 @@ class OdontogramVersion(models.Model):
 
     def __str__(self):
         return f"Odontograma {self.patient} · versión {self.version_number}"
+
+
+class PatientDocument(models.Model):
+    patient = models.ForeignKey(
+        Patient,
+        on_delete=models.PROTECT,
+        related_name="documents",
+    )
+    category = models.CharField(max_length=80)
+    document_date = models.DateField()
+    notes = models.TextField(blank=True)
+    original_name = models.CharField(max_length=255)
+    mime_type = models.CharField(max_length=64)
+    size_bytes = models.PositiveBigIntegerField()
+    file = models.FileField(
+        storage=private_document_storage,
+        upload_to=patient_document_path,
+        max_length=255,
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="uploaded_patient_documents",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-document_date", "-created_at")
+        indexes = (
+            models.Index(
+                fields=("patient", "-document_date"),
+                name="patient_doc_patient_date_idx",
+            ),
+            models.Index(fields=("category",), name="patient_doc_category_idx"),
+        )
+
+    def __str__(self):
+        return f"{self.original_name} · {self.patient}"

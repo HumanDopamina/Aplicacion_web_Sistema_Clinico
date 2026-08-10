@@ -1,4 +1,4 @@
-import { apiRequest } from './api'
+import { apiBlobRequest, apiRequest } from './api'
 
 const authorization = (access) => ({ Authorization: `Bearer ${access}` })
 
@@ -73,3 +73,40 @@ export const updatePatient = (access, id, changes) => apiRequest(`/api/patients/
   body: JSON.stringify(changes),
   headers: authorization(access),
 })
+
+export const listPatientDocuments = (access, patientId, filters = {}) => {
+  const query = new URLSearchParams()
+  if (filters.search?.trim()) query.set('search', filters.search.trim())
+  if (filters.category?.trim()) query.set('category', filters.category.trim())
+  const suffix = query.size ? `?${query.toString().replaceAll('+', '%20')}` : ''
+  return apiRequest(`/api/patients/${patientId}/documents/${suffix}`, {
+    headers: authorization(access),
+  })
+}
+
+export const listDocumentCategories = (access) => apiRequest('/api/patients/document-categories/', {
+  headers: authorization(access),
+})
+
+export const uploadPatientDocuments = (access, patientId, payload) => {
+  const body = new FormData()
+  payload.files.forEach((file) => body.append('files', file))
+  body.append('category', payload.category)
+  body.append('document_date', payload.documentDate)
+  body.append('notes', payload.notes || '')
+  return apiRequest(`/api/patients/${patientId}/documents/`, {
+    method: 'POST', body, headers: authorization(access),
+  })
+}
+
+export const getPatientDocumentContent = (access, patientId, documentId, download = false) => (
+  apiBlobRequest(
+    `/api/patients/${patientId}/documents/${documentId}/content/${download ? '?download=true' : ''}`,
+    { headers: authorization(access) },
+  )
+)
+
+export const deletePatientDocument = (access, patientId, documentId) => apiRequest(
+  `/api/patients/${patientId}/documents/${documentId}/`,
+  { method: 'DELETE', headers: authorization(access) },
+)

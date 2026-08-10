@@ -1,10 +1,20 @@
 from datetime import date
 
 from django.db import IntegrityError, transaction
+from django.urls import reverse
 from rest_framework import serializers
 
+from apps.clinics.availability import clinic_today
+
 from .identifiers import normalize_national_id
-from .models import ClinicalRecord, Consultation, OdontogramVersion, Patient
+from .documents import (
+    MAX_BATCH_FILES,
+    MAX_BATCH_SIZE,
+    normalize_category,
+    safe_original_name,
+    validate_document_file,
+)
+from .models import ClinicalRecord, Consultation, OdontogramVersion, Patient, PatientDocument
 from .odontograms import (
     create_initial_odontogram_version,
     create_odontogram_revision,
@@ -239,3 +249,85 @@ class OdontogramRevisionCreateSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         return OdontogramVersionSerializer(instance, context=self.context).data
+
+
+class PatientDocumentSerializer(serializers.ModelSerializer):
+    uploaded_by_name = serializers.SerializerMethodField()
+    content_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PatientDocument
+        fields = (
+            "id",
+            "category",
+            "document_date",
+            "notes",
+            "original_name",
+            "mime_type",
+            "size_bytes",
+            "uploaded_by",
+            "uploaded_by_name",
+            "created_at",
+            "content_url",
+        )
+        read_only_fields = fields
+
+    def get_uploaded_by_name(self, document):
+        return document.uploaded_by.get_full_name().strip() or document.uploaded_by.email
+
+    def get_content_url(self, document):
+        return reverse(
+            "patient-document-content",
+            kwargs={"patient_pk": document.patient_id, "pk": document.pk},
+        )
+
+
+class PatientDocumentBatchUploadSerializer(serializers.Serializer):
+    files = serializers.ListField(
+        child=serializers.FileField(),
+        min_length=1,
+        max_length=MAX_BATCH_FILES,
+    )
+    category = serializers.CharField(max_length=80)
+    document_date = serializers.DateField(required=False, default=clinic_today)
+    notes = serializers.CharField(required=False, allow_blank=True, default="", max_length=2000)
+
+    def validate_category(self, value):
+        normalized = normalize_category(value)
+        if not normalized:
+            raise serializers.ValidationError("Indica una categoría para los documentos.")
+        return normalized
+
+    def validate_files(self, files):
+        if sum(uploaded_file.size for uploaded_file in files) > MAX_BATCH_SIZE:
+            raise serializers.ValidationError("El lote puede pesar como máximo 50 MB.")
+        for uploaded_file in files:
+            validate_document_file(uploaded_file)
+        return files
+
+    def create(self, validated_data):
+        files = validated_data.pop("files")
+        patient = self.context["patient"]
+        uploaded_by = self.context["request"].user
+        created = []
+        try:
+            with transaction.atomic():
+                for uploaded_file in files:
+                    created.append(PatientDocument.objects.create(
+                        patient=patient,
+                        uploaded_by=uploaded_by,
+                        original_name=safe_original_name(uploaded_file.name),
+                        mime_type=uploaded_file.content_type.lower(),
+                        size_bytes=uploaded_file.size,
+                        file=uploaded_file,
+                        **validated_data,
+                    ))
+        except Exception:
+            for document in created:
+                if document.file.name:
+                    document.file.storage.delete(document.file.name)
+            raise
+        return created
+
+    def to_representation(self, instance):
+        return PatientDocumentSerializer(instance, many=True, context=self.context).data

@@ -21,13 +21,13 @@ export function PatientTabs({ patientId, active = 'summary', isNew = false }) {
     { key: 'summary', label: 'Resumen clínico', to: patientId ? `/pacientes/${patientId}` : '' },
     { key: 'consultations', label: 'Consultas', to: patientId ? `/pacientes/${patientId}/consultas` : '' },
     { key: 'odontogram', label: 'Odontograma', to: patientId ? `/pacientes/${patientId}/odontogramas` : '' },
-    { key: 'documents', label: 'Documentos', disabled: true },
+    { key: 'documents', label: 'Documentos', to: patientId ? `/pacientes/${patientId}/documentos` : '' },
   ]
   const classes = (key, disabled) => `whitespace-nowrap border-b-2 py-3 text-xs transition-colors ${active === key ? 'border-blue-600 font-semibold text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'} ${disabled ? 'cursor-not-allowed opacity-45' : ''}`
 
-  return <nav aria-label="Secciones del expediente" role="tablist" className="mt-1 flex gap-6 overflow-x-auto border-b border-slate-200 px-4">
+  return <nav aria-label="Secciones del expediente" role="tablist" className="mt-1 flex gap-4 overflow-x-auto border-b border-slate-200 sm:gap-6 sm:px-4">
     {tabs.map((tab) => {
-      const disabled = isNew || tab.disabled
+      const disabled = isNew
       return disabled
         ? <button key={tab.key} type="button" role="tab" aria-selected={active === tab.key} disabled className={classes(tab.key, true)}>{tab.label}</button>
         : <Link key={tab.key} to={tab.to} role="tab" aria-selected={active === tab.key} className={classes(tab.key, false)}>{tab.label}</Link>
