@@ -21,6 +21,10 @@ export const listPatientConsultations = (access, id) => apiRequest(`/api/patient
   headers: authorization(access),
 })
 
+export const listRecentConsultations = (access) => apiRequest('/api/patients/consultations/recent/', {
+  headers: authorization(access),
+})
+
 export const getPatientConsultation = (access, patientId, consultationId) => apiRequest(
   `/api/patients/${patientId}/consultations/${consultationId}/`,
   { headers: authorization(access) },

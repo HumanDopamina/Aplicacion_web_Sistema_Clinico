@@ -6,6 +6,11 @@ PERMISSION_CATALOG = (
     {"code": "patients.create", "label": "Registrar pacientes", "group": "Pacientes"},
     {"code": "patients.edit", "label": "Editar pacientes", "group": "Pacientes"},
     {"code": "consultations.view", "label": "Ver consultas", "group": "Consultas"},
+    {
+        "code": "consultations.view_all",
+        "label": "Ver consultas de todo el equipo",
+        "group": "Consultas",
+    },
     {"code": "consultations.create", "label": "Registrar consultas", "group": "Consultas"},
     {"code": "consultations.edit", "label": "Editar consultas", "group": "Consultas"},
     {"code": "appointments.view", "label": "Ver citas", "group": "Citas"},

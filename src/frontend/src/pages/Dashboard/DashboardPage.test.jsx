@@ -2,19 +2,35 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listAppointments } from '../../services/appointmentService'
-import { listPatients } from '../../services/patientService'
+import { listPatients, listRecentConsultations } from '../../services/patientService'
 import DashboardPage from './DashboardPage'
 
 vi.mock('../../services/appointmentService')
 vi.mock('../../services/patientService', async (importOriginal) => ({
   ...await importOriginal(),
   listPatients: vi.fn(),
+  listRecentConsultations: vi.fn(),
 }))
+
+const recentConsultation = {
+  id: 14,
+  patient: 3,
+  patient_name: 'María García',
+  patient_code: 'PAC-00003',
+  professional_name: 'Dra. Elena Rivera',
+  date: '2026-08-10',
+  time: '10:30:00',
+  consultation_type: 'SEGUIMIENTO',
+  consultation_type_display: 'Seguimiento',
+  status: 'COMPLETADA',
+  status_display: 'Completada',
+}
 
 describe('DashboardPage', () => {
   beforeEach(() => {
     listPatients.mockResolvedValue([])
     listAppointments.mockResolvedValue([])
+    listRecentConsultations.mockResolvedValue([])
   })
   afterEach(() => {
     cleanup()
@@ -31,9 +47,11 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Bienvenido, Dr. Arguello' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Nuevo paciente' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Nueva cita' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Agendar citas' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Citas de hoy' })).toBeInTheDocument()
     expect(await screen.findByText('No hay citas programadas para hoy.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Consultas recientes' })).toBeInTheDocument()
+    expect(await screen.findByText('No hay consultas recientes.')).toBeInTheDocument()
     expect(screen.getByText('Pacientes recientes')).toBeInTheDocument()
     expect(await screen.findByText('Aún no hay pacientes registrados.')).toBeInTheDocument()
     expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('0')
@@ -75,6 +93,107 @@ describe('DashboardPage', () => {
     expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('1')
     expect(screen.getByRole('link', { name: 'Ver expediente de leonel alberto hernandez alvarez' })).toHaveAttribute('href', '/pacientes/1')
     expect(screen.queryByText('Aún no hay pacientes registrados.')).not.toBeInTheDocument()
+  })
+
+  it('shows general consultations and recent patients to an administrator', async () => {
+    listRecentConsultations.mockResolvedValue([recentConsultation])
+    listPatients.mockResolvedValue([{
+      id: 8,
+      code: 'PAC-00008',
+      first_name: 'Carlos',
+      last_name: 'Mendoza',
+      full_name: 'Carlos Mendoza',
+    }])
+
+    render(
+      <MemoryRouter>
+        <DashboardPage user={{ first_name: 'Arguello', role: 'ADMINISTRADOR' }} accessToken="access-token" />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Consultas recientes' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
+    expect(screen.getByText('María García')).toBeInTheDocument()
+    expect(screen.getByText(/Seguimiento · Dra. Elena Rivera/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ver consulta de María García' })).toHaveAttribute(
+      'href',
+      '/pacientes/3/consultas/14',
+    )
+    expect(await screen.findByText('Carlos Mendoza')).toBeInTheDocument()
+  })
+
+  it('shows only personal recent consultations in the dentist side column', async () => {
+    listRecentConsultations.mockResolvedValue([recentConsultation])
+
+    render(
+      <MemoryRouter>
+        <DashboardPage
+          user={{
+            id: 4,
+            first_name: 'Elena',
+            role: 'ODONTOLOGO',
+            permissions: ['patients.view', 'consultations.view', 'appointments.view'],
+          }}
+          accessToken="access-token"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Mis consultas recientes' })).toBeInTheDocument()
+    expect(screen.getByText('María García')).toBeInTheDocument()
+    expect(screen.getByText('Seguimiento')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Pacientes recientes' })).not.toBeInTheDocument()
+  })
+
+  it('hides the consultation summary from reception without team visibility', async () => {
+    render(
+      <MemoryRouter>
+        <DashboardPage
+          user={{
+            first_name: 'Recepción',
+            role: 'RECEPCIONISTA',
+            permissions: ['patients.view', 'consultations.view'],
+          }}
+          accessToken="access-token"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByRole('heading', { name: /consultas recientes/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
+  })
+
+  it('shows both summaries to reception with team consultation visibility', async () => {
+    listRecentConsultations.mockResolvedValue([recentConsultation])
+
+    render(
+      <MemoryRouter>
+        <DashboardPage
+          user={{
+            first_name: 'Recepción',
+            role: 'RECEPCIONISTA',
+            permissions: ['patients.view', 'consultations.view', 'consultations.view_all'],
+          }}
+          accessToken="access-token"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Consultas recientes' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
+  })
+
+  it('shows a separate error state when recent consultations cannot be loaded', async () => {
+    listRecentConsultations.mockRejectedValue(new Error('No se pudieron cargar las consultas.'))
+
+    render(
+      <MemoryRouter>
+        <DashboardPage user={{ first_name: 'Arguello', role: 'ADMINISTRADOR' }} accessToken="access-token" />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudieron cargar las consultas.')
+    expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
   })
 
   it('opens the full patient record page from the dashboard action', () => {
@@ -170,7 +289,7 @@ describe('DashboardPage', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Agendar citas' }))
 
     expect(screen.getByRole('heading', { name: 'Agenda de citas' })).toBeInTheDocument()
   })

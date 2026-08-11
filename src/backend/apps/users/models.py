@@ -1,6 +1,8 @@
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 
+from .storage import private_avatar_storage, user_avatar_path
+
 
 class UserManager(BaseUserManager):
     use_in_migrations = True
@@ -34,6 +36,12 @@ class User(AbstractUser):
     username = None
     email = models.EmailField("correo electrónico", unique=True)
     role = models.CharField(max_length=20, choices=Role.choices)
+    phone = models.CharField("teléfono", max_length=30, blank=True)
+    avatar = models.ImageField(
+        upload_to=user_avatar_path,
+        storage=private_avatar_storage,
+        blank=True,
+    )
     token_version = models.PositiveIntegerField(default=0, editable=False)
 
     USERNAME_FIELD = "email"

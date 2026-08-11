@@ -1,9 +1,14 @@
 from datetime import datetime, timedelta
+from io import BytesIO
+import os
+import shutil
+import tempfile
 from unittest.mock import patch
 
 from django.contrib.auth.tokens import default_token_generator
 from django.core.cache import cache
 from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from django.urls import reverse
 from django.utils.encoding import force_bytes
@@ -11,8 +16,26 @@ from django.utils.http import urlsafe_base64_encode
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
+from PIL import Image
 
 from .models import User
+
+
+def profile_image(name="avatar.png", image_format="PNG"):
+    content = BytesIO()
+    Image.new("RGB", (24, 24), "#1d4ed8").save(content, format=image_format)
+    return SimpleUploadedFile(name, content.getvalue(), content_type="image/png")
+
+
+def oversized_profile_image():
+    content = BytesIO()
+    pixels = os.urandom(900 * 900 * 3)
+    Image.frombytes("RGB", (900, 900), pixels).save(content, format="PNG")
+    return SimpleUploadedFile(
+        "oversized-avatar.png",
+        content.getvalue(),
+        content_type="image/png",
+    )
 
 
 class LoginApiTests(APITestCase):
@@ -43,6 +66,7 @@ class LoginApiTests(APITestCase):
                 "patients.create",
                 "patients.edit",
                 "consultations.view",
+                "consultations.view_all",
                 "consultations.create",
                 "consultations.edit",
                 "appointments.view",
@@ -55,6 +79,9 @@ class LoginApiTests(APITestCase):
             ],
         )
         self.assertNotIn("password", response.data["user"])
+        self.assertEqual(response.data["user"]["last_name"], "")
+        self.assertEqual(response.data["user"]["phone"], "")
+        self.assertEqual(response.data["user"]["avatar_url"], "")
 
     def test_invalid_credentials_return_generic_error(self):
         response = self.client.post(
@@ -135,6 +162,221 @@ class LoginApiTests(APITestCase):
             self.client.get(reverse("users:current-user")).status_code,
             200,
         )
+
+
+class CurrentUserProfileApiTests(APITestCase):
+    def setUp(self):
+        self.private_root = tempfile.mkdtemp()
+        self.settings_override = override_settings(PRIVATE_MEDIA_ROOT=self.private_root)
+        self.settings_override.enable()
+        self.user = User.objects.create_user(
+            email="perfil@dentalclinic.com",
+            password="ContraseñaPerfil123!",
+            role=User.Role.ODONTOLOGO,
+            first_name="Elena",
+            last_name="Vargas",
+        )
+        self.other = User.objects.create_user(
+            email="otro@dentalclinic.com",
+            password="ContraseñaOtro123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.admin = User.objects.create_user(
+            email="admin-perfil@dentalclinic.com",
+            password="ContraseñaAdmin123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.client.force_authenticate(self.user)
+
+    def tearDown(self):
+        self.settings_override.disable()
+        shutil.rmtree(self.private_root, ignore_errors=True)
+
+    def test_hu11_updates_own_identity_without_allowing_privilege_changes(self):
+        response = self.client.patch(
+            reverse("users:current-user"),
+            {
+                "first_name": "Elena María",
+                "last_name": "Rivera",
+                "phone": "+505 8888 1111",
+                "role": User.Role.ADMINISTRADOR,
+                "is_active": False,
+                "permissions": ["appointments.view_all"],
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.first_name, "Elena María")
+        self.assertEqual(self.user.last_name, "Rivera")
+        self.assertEqual(self.user.phone, "+505 8888 1111")
+        self.assertEqual(self.user.role, User.Role.ODONTOLOGO)
+        self.assertTrue(self.user.is_active)
+        self.assertEqual(response.data["phone"], "+505 8888 1111")
+        self.assertNotIn("password", response.data)
+
+    def test_hu11_requires_current_password_only_when_email_changes(self):
+        without_password = self.client.patch(
+            reverse("users:current-user"),
+            {"email": "nuevo@dentalclinic.com"},
+            format="multipart",
+        )
+        wrong_password = self.client.patch(
+            reverse("users:current-user"),
+            {"email": "nuevo@dentalclinic.com", "current_password": "incorrecta"},
+            format="multipart",
+        )
+
+        self.assertEqual(without_password.status_code, 400)
+        self.assertIn("current_password", without_password.data)
+        self.assertEqual(wrong_password.status_code, 400)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "perfil@dentalclinic.com")
+
+        updated = self.client.patch(
+            reverse("users:current-user"),
+            {
+                "email": " NUEVO@dentalclinic.com ",
+                "current_password": "ContraseñaPerfil123!",
+            },
+            format="multipart",
+        )
+        self.assertEqual(updated.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "nuevo@dentalclinic.com")
+
+    def test_hu11_uploads_replaces_and_removes_a_private_avatar(self):
+        uploaded = self.client.patch(
+            reverse("users:current-user"),
+            {"avatar": profile_image()},
+            format="multipart",
+        )
+
+        self.assertEqual(uploaded.status_code, 200)
+        self.user.refresh_from_db()
+        first_name = self.user.avatar.name
+        self.assertTrue(first_name.startswith(f"users/{self.user.pk}/avatars/"))
+        self.assertTrue(self.user.avatar.storage.exists(first_name))
+        self.assertTrue(uploaded.data["avatar_url"].startswith(
+            f'{reverse("users:current-user-avatar")}?v=',
+        ))
+        first_url = uploaded.data["avatar_url"]
+
+        replaced = self.client.patch(
+            reverse("users:current-user"),
+            {"avatar": profile_image("replacement.png")},
+            format="multipart",
+        )
+        self.assertEqual(replaced.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertNotEqual(self.user.avatar.name, first_name)
+        self.assertFalse(self.user.avatar.storage.exists(first_name))
+        self.assertNotEqual(replaced.data["avatar_url"], first_url)
+
+        removed = self.client.patch(
+            reverse("users:current-user"),
+            {"remove_avatar": True},
+            format="multipart",
+        )
+        self.assertEqual(removed.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.avatar)
+        self.assertEqual(removed.data["avatar_url"], "")
+
+    def test_hu11_avatar_content_is_limited_to_owner_and_administrator(self):
+        self.user.avatar = profile_image()
+        self.user.save(update_fields=["avatar"])
+        url = reverse("users:user-avatar", kwargs={"pk": self.user.pk})
+
+        own_response = self.client.get(url)
+        self.assertEqual(own_response.status_code, 200)
+        self.assertEqual(own_response["X-Content-Type-Options"], "nosniff")
+
+        self.client.force_authenticate(self.other)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+        self.client.force_authenticate(self.admin)
+        self.assertEqual(self.client.get(url).status_code, 200)
+
+    def test_hu11_rejects_duplicate_email_and_unsafe_avatar_content(self):
+        duplicate = self.client.patch(
+            reverse("users:current-user"),
+            {
+                "email": self.other.email.upper(),
+                "current_password": "ContraseñaPerfil123!",
+            },
+            format="multipart",
+        )
+        unsafe_avatar = self.client.patch(
+            reverse("users:current-user"),
+            {
+                "avatar": SimpleUploadedFile(
+                    "avatar.png",
+                    b"not-a-real-image",
+                    content_type="image/png",
+                ),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertIn("email", duplicate.data)
+        self.assertEqual(unsafe_avatar.status_code, 400)
+        self.assertIn("avatar", unsafe_avatar.data)
+
+    def test_hu11_rejects_an_avatar_larger_than_two_megabytes(self):
+        response = self.client.patch(
+            reverse("users:current-user"),
+            {
+                "avatar": oversized_profile_image(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("2 MB", str(response.data["avatar"]))
+
+    def test_hu11_administrator_updates_the_complete_profile_of_a_staff_member(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": self.other.pk}),
+            {"phone": "+505 7777 2222", "avatar": profile_image()},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.other.refresh_from_db()
+        self.assertEqual(self.other.phone, "+505 7777 2222")
+        self.assertTrue(self.other.avatar)
+        self.assertEqual(
+            response.data["avatar_url"].split("?", maxsplit=1)[0],
+            reverse("users:user-avatar", kwargs={"pk": self.other.pk}),
+        )
+
+    def test_hu11_administrator_creates_a_staff_member_with_phone_and_avatar(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.post(
+            reverse("users:user-list"),
+            {
+                "email": "nuevo-perfil@dentalclinic.com",
+                "first_name": "Sara",
+                "last_name": "López",
+                "phone": "+505 8666 3333",
+                "avatar": profile_image(),
+                "role": User.Role.RECEPCIONISTA,
+                "password": "ContraseñaNueva123!",
+                "confirm_password": "ContraseñaNueva123!",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        created = User.objects.get(email="nuevo-perfil@dentalclinic.com")
+        self.assertEqual(created.phone, "+505 8666 3333")
+        self.assertTrue(created.avatar)
 
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
@@ -611,6 +853,7 @@ class RolePermissionPresetApiTests(APITestCase):
                 "patients.create",
                 "patients.edit",
                 "consultations.view",
+                "consultations.view_all",
                 "consultations.create",
                 "consultations.edit",
                 "appointments.view",
@@ -656,6 +899,30 @@ class RolePermissionPresetApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("appointments.view_all", str(response.data))
+
+    def test_consultation_view_all_requires_the_base_consultation_view_permission(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{User.Role.ODONTOLOGO}/",
+            {"permissions": ["consultations.view_all"]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "consultations.view_all requiere el permiso consultations.view",
+            str(response.data),
+        )
+
+    def test_consultation_view_all_is_not_enabled_by_default(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, 200)
+        for preset in response.data["presets"]:
+            self.assertNotIn("consultations.view_all", preset["permissions"])
 
     def test_hu09_effective_permissions_follow_the_global_role_preset(self):
         self.client.force_authenticate(self.admin)

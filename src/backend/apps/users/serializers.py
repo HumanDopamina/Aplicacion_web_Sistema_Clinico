@@ -1,3 +1,6 @@
+from hashlib import sha256
+from pathlib import Path
+
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
@@ -5,11 +8,85 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
+from rest_framework.reverse import reverse
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
+from PIL import Image, UnidentifiedImageError
 
 from .models import RolePermissionPreset, User
 from .permissions import PERMISSION_CODES, get_effective_permissions, order_permissions
+
+
+AVATAR_FORMATS = {
+    "image/jpeg": {"JPEG"},
+    "image/png": {"PNG"},
+    "image/webp": {"WEBP"},
+}
+AVATAR_EXTENSIONS = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+MAX_AVATAR_SIZE = 2 * 1024 * 1024
+
+
+def protected_avatar_url(user, route_name, kwargs=None):
+    if not user.avatar:
+        return ""
+    path = reverse(route_name, kwargs=kwargs, request=None)
+    version = sha256(user.avatar.name.encode()).hexdigest()[:12]
+    return f"{path}?v={version}"
+
+
+def validate_avatar(uploaded_file):
+    extension = Path(uploaded_file.name).suffix.lower()
+    content_type = getattr(uploaded_file, "content_type", "").lower()
+    if (
+        extension not in AVATAR_EXTENSIONS
+        or content_type not in AVATAR_FORMATS
+        or AVATAR_EXTENSIONS[extension] != content_type
+    ):
+        raise serializers.ValidationError("Usa una imagen PNG, JPEG o WebP.")
+    if uploaded_file.size > MAX_AVATAR_SIZE:
+        raise serializers.ValidationError("La foto no puede superar 2 MB.")
+    uploaded_file.seek(0)
+    try:
+        with Image.open(uploaded_file) as image:
+            if image.format not in AVATAR_FORMATS[content_type]:
+                raise serializers.ValidationError(
+                    "El formato real de la imagen no coincide.",
+                )
+            image.verify()
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise serializers.ValidationError(
+            "El contenido de la imagen no es válido.",
+        ) from error
+    finally:
+        uploaded_file.seek(0)
+    return uploaded_file
+
+
+class AvatarUpdateMixin:
+    def get_avatar_url(self, user):
+        route_name = self.context.get("avatar_route", "users:user-avatar")
+        if route_name == "users:current-user-avatar":
+            return protected_avatar_url(user, route_name)
+        return protected_avatar_url(user, route_name, {"pk": user.pk})
+
+    def validate_avatar(self, value):
+        return validate_avatar(value)
+
+    def update(self, instance, validated_data):
+        remove_avatar = validated_data.pop("remove_avatar", False)
+        old_storage = instance.avatar.storage
+        old_name = instance.avatar.name
+        if remove_avatar:
+            validated_data["avatar"] = ""
+        updated = super().update(instance, validated_data)
+        if old_name and (remove_avatar or "avatar" in validated_data):
+            old_storage.delete(old_name)
+        return updated
 
 
 class LoginSerializer(TokenObtainPairSerializer):
@@ -45,6 +122,9 @@ class LoginSerializer(TokenObtainPairSerializer):
                 "id": user.id,
                 "email": user.email,
                 "first_name": user.first_name,
+                "last_name": user.last_name,
+                "phone": user.phone,
+                "avatar_url": protected_avatar_url(user, "users:current-user-avatar"),
                 "role": user.role,
                 "permissions": get_effective_permissions(user),
             },
@@ -145,7 +225,65 @@ class ChangePasswordSerializer(serializers.Serializer):
         return user
 
 
-class UserAdminSerializer(serializers.ModelSerializer):
+class CurrentUserProfileSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
+    avatar_url = serializers.SerializerMethodField()
+    remove_avatar = serializers.BooleanField(write_only=True, required=False, default=False)
+    current_password = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        trim_whitespace=False,
+    )
+    permissions = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = (
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "phone",
+            "avatar",
+            "avatar_url",
+            "remove_avatar",
+            "current_password",
+            "role",
+            "permissions",
+        )
+        read_only_fields = ("id", "role", "permissions", "avatar_url")
+        extra_kwargs = {"avatar": {"write_only": True, "required": False}}
+
+    def get_permissions(self, user):
+        return get_effective_permissions(user)
+
+    def validate_email(self, value):
+        email = User.objects.normalize_email(value).strip().lower()
+        duplicate = User.objects.filter(email__iexact=email).exclude(pk=self.instance.pk)
+        if duplicate.exists():
+            raise serializers.ValidationError(
+                "Ya existe un usuario con este correo electrónico.",
+            )
+        return email
+
+    def validate(self, attrs):
+        current_password = attrs.pop("current_password", "")
+        new_email = attrs.get("email")
+        if new_email is not None and new_email != self.instance.email:
+            if not current_password:
+                raise serializers.ValidationError({
+                    "current_password": "Confirma tu contraseña actual para cambiar el correo.",
+                })
+            if not self.instance.check_password(current_password):
+                raise serializers.ValidationError({
+                    "current_password": "La contraseña actual es incorrecta.",
+                })
+        return attrs
+
+
+class UserAdminSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
+    avatar_url = serializers.SerializerMethodField()
+    remove_avatar = serializers.BooleanField(write_only=True, required=False, default=False)
     password = serializers.CharField(write_only=True, trim_whitespace=False)
     confirm_password = serializers.CharField(write_only=True, trim_whitespace=False)
 
@@ -156,12 +294,17 @@ class UserAdminSerializer(serializers.ModelSerializer):
             "email",
             "first_name",
             "last_name",
+            "phone",
+            "avatar",
+            "avatar_url",
+            "remove_avatar",
             "role",
             "is_active",
             "password",
             "confirm_password",
         )
         read_only_fields = ("id", "is_active")
+        extra_kwargs = {"avatar": {"write_only": True, "required": False}}
 
     def validate_email(self, value):
         email = User.objects.normalize_email(value).strip().lower()
@@ -190,10 +333,14 @@ class UserAdminSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop("confirm_password")
+        validated_data.pop("remove_avatar", None)
         return User.objects.create_user(**validated_data)
 
 
-class UserAdminUpdateSerializer(serializers.ModelSerializer):
+class UserAdminUpdateSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
+    avatar_url = serializers.SerializerMethodField()
+    remove_avatar = serializers.BooleanField(write_only=True, required=False, default=False)
+
     class Meta:
         model = User
         fields = (
@@ -201,10 +348,15 @@ class UserAdminUpdateSerializer(serializers.ModelSerializer):
             "email",
             "first_name",
             "last_name",
+            "phone",
+            "avatar",
+            "avatar_url",
+            "remove_avatar",
             "role",
             "is_active",
         )
         read_only_fields = ("id",)
+        extra_kwargs = {"avatar": {"write_only": True, "required": False}}
 
     def validate_email(self, value):
         email = User.objects.normalize_email(value).strip().lower()
@@ -232,5 +384,9 @@ class RolePermissionPresetSerializer(serializers.ModelSerializer):
         if "appointments.view_all" in permissions and "appointments.view" not in permissions:
             raise serializers.ValidationError(
                 "appointments.view_all requiere el permiso appointments.view.",
+            )
+        if "consultations.view_all" in permissions and "consultations.view" not in permissions:
+            raise serializers.ValidationError(
+                "consultations.view_all requiere el permiso consultations.view.",
             )
         return permissions

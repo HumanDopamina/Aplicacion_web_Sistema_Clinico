@@ -194,7 +194,8 @@ describe('authenticated routes', () => {
   it('clears the session and protects history after logout', async () => {
     renderAuthenticated('ADMINISTRADOR', true)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir menú de Usuario' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Cerrar sesión' }))
 
     expect(await screen.findByRole('heading', { name: 'Bienvenido' })).toBeInTheDocument()
     expect(localStorage.getItem('dentalclinic_session')).toBeNull()
@@ -219,14 +220,39 @@ describe('authenticated routes', () => {
     expect(screen.queryByRole('heading', { name: 'Configuración' })).not.toBeInTheDocument()
   })
 
-  it('offers password change navigation to every authenticated role', () => {
+  it('offers profile, password change and logout actions from the avatar menu', () => {
     renderAuthenticated('ODONTOLOGO')
 
-    expect(screen.getByRole('link', { name: 'Cambiar contraseña' })).toHaveAttribute(
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir menú de Usuario' }))
+
+    expect(screen.getByRole('menuitem', { name: 'Mi perfil' })).toHaveAttribute('href', '/mi-perfil')
+    expect(screen.getByRole('menuitem', { name: 'Cambiar contraseña' })).toHaveAttribute(
       'href',
       '/cambiar-contrasena',
     )
+    expect(screen.getByRole('menuitem', { name: 'Cerrar sesión' })).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menuitem', { name: 'Mi perfil' })).not.toBeInTheDocument()
   })
+
+  it.each(['ADMINISTRADOR', 'RECEPCIONISTA', 'ODONTOLOGO'])(
+    'allows %s to open the personal profile route',
+    async (role) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+        ...session(role).user,
+        id: 4,
+        last_name: 'Clínica',
+        phone: '',
+        avatar_url: '',
+      })))
+
+      renderAuthenticated(role, false, '/mi-perfil')
+
+      expect(await screen.findByRole('heading', { name: 'Mi perfil' })).toBeInTheDocument()
+      expect(screen.getByDisplayValue(`${role.toLowerCase()}@test.com`)).toBeInTheDocument()
+    },
+  )
 
   it('uses the clinic logo in the main navigation and opens on the dashboard', () => {
     renderAuthenticated('ODONTOLOGO')

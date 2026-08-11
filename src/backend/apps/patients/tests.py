@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 
 from apps.users.models import RolePermissionPreset, User
 
-from .models import Patient
+from .models import Consultation, Patient
 
 
 class PatientApiTests(APITestCase):
@@ -436,6 +436,118 @@ class PatientApiTests(APITestCase):
         self.assertEqual(response.data[0]["professional_name"], "Elena Rivera")
         self.assertEqual(response.data[0]["status_display"], "Completada")
         self.assertEqual(response.data[1]["date"], "2026-08-01")
+
+
+class RecentConsultationApiTests(APITestCase):
+    url = "/api/patients/consultations/recent/"
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="admin-recent-consultations@dentalclinic.com",
+            password="ContraseñaAdmin123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.dentist = User.objects.create_user(
+            email="dentist-recent-consultations@dentalclinic.com",
+            password="ContraseñaDentist123!",
+            role=User.Role.ODONTOLOGO,
+            first_name="Elena",
+            last_name="Rivera",
+        )
+        self.other_dentist = User.objects.create_user(
+            email="other-recent-consultations@dentalclinic.com",
+            password="ContraseñaDentist123!",
+            role=User.Role.ODONTOLOGO,
+            first_name="Pablo",
+            last_name="Suárez",
+        )
+        self.receptionist = User.objects.create_user(
+            email="reception-recent-consultations@dentalclinic.com",
+            password="ContraseñaRecepcion123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.patient = Patient.objects.create(
+            first_name="María",
+            last_name="García",
+            birth_place="Managua",
+            national_id="001-160498-0001A",
+            gender="FEMENINO",
+            date_of_birth="1998-04-16",
+            registered_by=self.admin,
+        )
+
+    def create_consultation(self, professional, date, time="09:00:00"):
+        return Consultation.objects.create(
+            patient=self.patient,
+            professional=professional,
+            date=date,
+            time=time,
+            consultation_type=Consultation.Type.GENERAL,
+            summary="Control clínico.",
+            status=Consultation.Status.COMPLETED,
+        )
+
+    def test_requires_consultation_view_permission(self):
+        preset = RolePermissionPreset.objects.get(role=User.Role.RECEPCIONISTA)
+        preset.permissions = ["patients.view"]
+        preset.save(update_fields=["permissions"])
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_without_view_all_returns_only_the_authenticated_professionals_rows(self):
+        own = self.create_consultation(self.dentist, "2026-08-09")
+        self.create_consultation(self.other_dentist, "2026-08-10")
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.data], [own.pk])
+        self.assertEqual(
+            set(response.data[0]),
+            {
+                "id", "patient", "patient_name", "patient_code",
+                "professional_name", "date", "time", "consultation_type",
+                "consultation_type_display", "status", "status_display",
+            },
+        )
+        self.assertEqual(response.data[0]["patient_name"], "María García")
+        self.assertEqual(response.data[0]["patient_code"], self.patient.code)
+        self.assertEqual(response.data[0]["professional_name"], "Elena Rivera")
+
+    def test_administrator_receives_only_the_four_most_recent_rows(self):
+        created = [
+            self.create_consultation(self.dentist, f"2026-08-{day:02d}")
+            for day in range(6, 11)
+        ]
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in response.data],
+            [consultation.pk for consultation in reversed(created[1:])],
+        )
+
+    def test_view_all_returns_consultations_from_the_whole_team(self):
+        first = self.create_consultation(self.dentist, "2026-08-09")
+        second = self.create_consultation(self.other_dentist, "2026-08-10")
+        preset = RolePermissionPreset.objects.get(role=User.Role.RECEPCIONISTA)
+        preset.permissions = ["consultations.view", "consultations.view_all"]
+        preset.save(update_fields=["permissions"])
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in response.data],
+            [second.pk, first.pk],
+        )
 
 
 class ConsultationApiTests(APITestCase):

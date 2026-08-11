@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useAuth } from '../../context/authContextValue'
 import { createUser, listUsers, updateUser } from '../../services/userService'
+import AuthenticatedAvatar from '../../components/AuthenticatedAvatar'
 import RolePermissionsPanel from './RolePermissionsPanel'
 
 const ClinicProfilePanel = lazy(() => import('./ClinicProfilePanel'))
@@ -25,6 +26,7 @@ const roleLabels = {
 const emptyForm = {
   first_name: '',
   last_name: '',
+  phone: '',
   email: '',
   role: 'ODONTOLOGO',
   password: '',
@@ -37,11 +39,25 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
     email: editingUser.email,
     first_name: editingUser.first_name,
     last_name: editingUser.last_name,
+    phone: editingUser.phone || '',
     role: editingUser.role,
     is_active: editingUser.is_active,
   } : emptyForm)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const [avatar, setAvatar] = useState(null)
+  const [avatarPreview, setAvatarPreview] = useState('')
+  const [removeAvatar, setRemoveAvatar] = useState(false)
+
+  useEffect(() => {
+    if (!avatar) {
+      setAvatarPreview('')
+      return undefined
+    }
+    const objectUrl = URL.createObjectURL(avatar)
+    setAvatarPreview(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [avatar])
 
   const update = (event) => {
     const { checked, name, type, value } = event.target
@@ -53,9 +69,12 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
     setError('')
     setSaving(true)
     try {
+      const payload = { ...form }
+      if (avatar) payload.avatar = avatar
+      if (removeAvatar) payload.remove_avatar = true
       const saved = isEditing
-        ? await updateUser(accessToken, editingUser.id, form)
-        : await createUser(accessToken, form)
+        ? await updateUser(accessToken, editingUser.id, payload)
+        : await createUser(accessToken, payload)
       onSaved(saved)
     } catch (requestError) {
       setError(requestError.message)
@@ -85,6 +104,19 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
           <label className="grid gap-1.5 text-sm font-medium text-slate-700 sm:col-span-2">Correo electrónico
             <input required type="email" name="email" value={form.email} onChange={update} className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
           </label>
+          <label className="grid gap-1.5 text-sm font-medium text-slate-700 sm:col-span-2">Teléfono
+            <input name="phone" value={form.phone} onChange={update} placeholder="+505 8888 8888" className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+          </label>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
+            <div className="flex flex-wrap items-center gap-4">
+              {avatarPreview ? <span className="grid h-14 w-14 overflow-hidden rounded-full bg-blue-100"><img src={avatarPreview} alt="Vista previa de la foto del miembro" className="h-full w-full object-cover" /></span> : <AuthenticatedAvatar user={removeAvatar ? { ...editingUser, avatar_url: '' } : editingUser} accessToken={accessToken} alt={editingUser ? `Foto de ${`${editingUser.first_name} ${editingUser.last_name}`.trim()}` : 'Foto del nuevo miembro'} className="h-14 w-14" />}
+              <div className="min-w-0 flex-1">
+                <label className="inline-flex cursor-pointer rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Foto de perfil<input type="file" aria-label="Foto de perfil" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={(event) => { setAvatar(event.target.files?.[0] || null); setRemoveAvatar(false) }} /></label>
+                <p className="mt-1 text-[11px] text-slate-400">PNG, JPEG o WebP · máximo 2 MB</p>
+              </div>
+              {isEditing && editingUser.avatar_url && !removeAvatar ? <button type="button" onClick={() => { setAvatar(null); setRemoveAvatar(true) }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">Quitar foto</button> : null}
+            </div>
+          </div>
           <label className="grid gap-1.5 text-sm font-medium text-slate-700 sm:col-span-2">Rol
             <select name="role" value={form.role} onChange={update} className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100">
               <option value="ODONTOLOGO">Odontólogo</option>
@@ -125,7 +157,7 @@ export default function SettingsPage() {
   const [loadError, setLoadError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
-  const [activeSection, setActiveSection] = useState('Gestión de Staff')
+  const [activeSection, setActiveSection] = useState('Perfil de la clínica')
 
   useEffect(() => {
     let active = true
@@ -198,7 +230,7 @@ export default function SettingsPage() {
                 <tbody className="divide-y divide-slate-100">
                   {users.map((user) => (
                     <tr key={user.id} className="hover:bg-slate-50">
-                      <td className="px-5 py-4"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-slate-500">{(user.first_name || user.email).slice(0, 2).toUpperCase()}</span><span><strong className="block text-sm text-slate-800">{`${user.first_name} ${user.last_name}`.trim() || user.email}</strong><small className="text-xs text-slate-500">{user.email}</small></span></div></td>
+                      <td className="px-5 py-4"><div className="flex items-center gap-3"><AuthenticatedAvatar user={user} accessToken={accessToken} alt={`Foto de ${`${user.first_name} ${user.last_name}`.trim() || user.email}`} className="h-9 w-9" /><span><strong className="block text-sm text-slate-800">{`${user.first_name} ${user.last_name}`.trim() || user.email}</strong><small className="text-xs text-slate-500">{user.email}</small></span></div></td>
                       <td className="px-5 py-4"><span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">{roleLabels[user.role] || user.role}</span></td>
                       <td className="px-5 py-4"><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${user.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{user.is_active ? 'Activo' : 'Inactivo'}</span></td>
                       <td className="px-5 py-4 text-right"><button type="button" onClick={() => openEditForm(user)} aria-label={`Editar a ${`${user.first_name} ${user.last_name}`.trim() || user.email}`} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:border-blue-200 hover:bg-blue-50">Editar</button></td>

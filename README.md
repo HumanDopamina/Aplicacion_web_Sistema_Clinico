@@ -180,6 +180,8 @@ Los enlaces de recuperación:
 | `POST` | `/api/auth/login/` | No | Inicia sesión y devuelve los tokens. |
 | `POST` | `/api/auth/token/refresh/` | Refresh token | Renueva automáticamente un access token vencido. |
 | `GET` | `/api/auth/me/` | Sí | Devuelve el usuario autenticado. |
+| `PATCH` | `/api/auth/me/` | Sí | Actualiza nombre, apellidos, teléfono, correo y foto del usuario autenticado. |
+| `GET` | `/api/auth/me/avatar/` | Propietario | Sirve la foto privada del usuario autenticado. |
 | `POST` | `/api/auth/logout/` | Sí | Revoca la sesión y el refresh token. |
 | `POST` | `/api/auth/password-reset/` | No | Solicita el enlace de recuperación. |
 | `POST` | `/api/auth/password-reset/confirm/` | No | Confirma una nueva contraseña con uid y token. |
@@ -187,6 +189,7 @@ Los enlaces de recuperación:
 | `GET` | `/api/auth/users/` | Administrador | Lista los usuarios registrados. |
 | `POST` | `/api/auth/users/` | Administrador | Registra un usuario con sus credenciales y rol. |
 | `PATCH` | `/api/auth/users/{id}/` | Administrador | Actualiza datos, rol y estado activo de un usuario. |
+| `GET` | `/api/auth/users/{id}/avatar/` | Propietario o administrador | Sirve una foto de perfil desde almacenamiento privado. |
 | `GET` | `/api/auth/role-permissions/` | Administrador | Lista el catálogo y los presets editables por rol. |
 | `PATCH` | `/api/auth/role-permissions/{role}/` | Administrador | Reemplaza el preset global de un rol editable. |
 
@@ -198,6 +201,7 @@ Los enlaces de recuperación:
 | `POST` | `/api/patients/` | `patients.create` | Registra un paciente, genera su código y crea `clinical_record`. |
 | `GET` | `/api/patients/{id}/` | `patients.view` | Abre la identidad y el expediente clínico completo. |
 | `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza datos personales y el expediente clínico anidado. |
+| `GET` | `/api/patients/consultations/recent/` | `consultations.view` | Devuelve hasta cuatro consultas recientes; `consultations.view_all` amplía el resumen a todo el equipo. |
 | `GET` | `/api/patients/{id}/consultations/` | `consultations.view` | Lista las consultas del paciente por fecha descendente. |
 | `POST` | `/api/patients/{id}/consultations/` | `consultations.create` | Registra una consulta y asigna el profesional autenticado. |
 | `GET` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.view` | Abre la ficha clínica completa de la consulta. |
@@ -250,6 +254,15 @@ npm run build
 3. Introduce la contraseña actual y confirma la nueva.
 4. Después del cambio, el sistema cierra la sesión y solicita iniciar nuevamente.
 
+### Perfil personal
+
+1. Inicia sesión y selecciona el avatar de la barra superior.
+2. Abre **Mi perfil** para actualizar nombre, apellidos, teléfono, correo o fotografía.
+3. Si cambias el correo usado para iniciar sesión, confirma la contraseña actual.
+4. La sesión permanece activa y la barra superior refleja los datos guardados inmediatamente.
+
+Las fotografías admiten PNG, JPEG o WebP de hasta 2 MB. Se guardan fuera del directorio público y solo el propietario o Administración pueden descargarlas mediante la API autenticada. El perfil personal nunca permite cambiar el rol, estado, permisos ni contraseña; esta última conserva su flujo independiente.
+
 ### Administración de usuarios
 
 1. Inicia sesión con una cuenta de rol `ADMINISTRADOR`.
@@ -259,7 +272,7 @@ npm run build
 5. El usuario creado queda disponible inmediatamente para iniciar sesión.
 6. Abre **Permisos por rol** para definir los accesos globales de recepcionistas y odontólogos.
 
-Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos sin mostrar ni modificar la contraseña. HU-07 permite desactivar la cuenta sin eliminarla, HU-08 asigna el rol y sus permisos, y HU-09 presenta todos los usuarios con su rol y estado.
+Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos sin mostrar ni modificar la contraseña. HU-07 permite desactivar la cuenta sin eliminarla, HU-08 asigna el rol y sus permisos, HU-09 presenta todos los usuarios con su rol y estado, y HU-11 incorpora teléfono y fotografía privada tanto al alta como a la edición administrativa.
 
 La aplicación rechaza correos ya registrados, incluso si se escriben usando una combinación diferente de mayúsculas y minúsculas. Los usuarios sin rol administrador no pueden acceder a esta pantalla ni a sus endpoints.
 
@@ -277,7 +290,9 @@ Para editar el expediente, el administrador debe otorgar `patients.edit` desde *
 
 La pestaña **Consultas** muestra el historial clínico persistido del paciente en orden descendente por fecha. Cada registro identifica el tipo, profesional, resumen y estado. **Nueva consulta** abre una ficha completa con el mismo comportamiento de edición directa: fecha/hora actuales y estado **En progreso**, nube para guardar, X para descartar y advertencia al abandonar cambios pendientes.
 
-El administrador gestiona `consultations.view`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
+El administrador gestiona `consultations.view`, `consultations.view_all`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. `consultations.view_all` no se asigna por defecto y amplía únicamente el resumen de consultas recientes del dashboard a todo el equipo. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
+
+En el dashboard, Odontología ve sus cuatro consultas más recientes en lugar de **Pacientes recientes**. Administración ve consultas generales y pacientes recientes en tarjetas apiladas. Recepción conserva pacientes recientes y solo incorpora el resumen general de consultas cuando su preset incluye `consultations.view_all`.
 
 ### Odontogramas por consulta
 
@@ -322,6 +337,6 @@ Antes de desplegar el sistema:
 
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-13 y HU-18 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El sistema permite registrar y administrar expedientes, consultas clínicas, odontogramas versionados, documentos privados del paciente y una agenda diaria, semanal y mensual de citas con validación de disponibilidad.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-11, HU-13 y HU-18 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El sistema permite administrar perfiles personales, registrar y administrar expedientes, consultas clínicas, odontogramas versionados, documentos privados del paciente y una agenda diaria, semanal y mensual de citas con validación de disponibilidad.
 
 La configuración operativa permite personalizar el perfil y branding de la clínica, definir jornadas con pausas y festivos, y administrar servicios y tarifas. Estas reglas controlan la disponibilidad de citas y usan la zona horaria configurada para el dashboard y la agenda. Consulta el contrato completo en [`docs/clinic-configuration.md`](docs/clinic-configuration.md).

@@ -8,6 +8,7 @@ import SettingsPage from './SettingsPage'
 
 vi.mock('../../services/userService', () => ({
   createUser: vi.fn(),
+  getUserAvatarContent: vi.fn(),
   listRolePermissionPresets: vi.fn(),
   listUsers: vi.fn(),
   updateRolePermissionPreset: vi.fn(),
@@ -38,6 +39,10 @@ const fillForm = () => {
   fireEvent.change(screen.getByLabelText('Confirmar contraseña'), { target: { value: 'ContraseñaSegura123!' } })
 }
 
+const openStaff = () => {
+  fireEvent.click(screen.getByRole('button', { name: /Gestión de Staff/ }))
+}
+
 describe('SettingsPage staff management', () => {
   beforeEach(() => {
     clinicService.getClinicOptions.mockResolvedValue({
@@ -55,6 +60,7 @@ describe('SettingsPage staff management', () => {
       email: 'nuevo@dentalclinic.com',
       first_name: 'Lucía',
       last_name: 'Méndez',
+      phone: '',
       role: 'ODONTOLOGO',
       is_active: true,
     })
@@ -63,6 +69,7 @@ describe('SettingsPage staff management', () => {
       email: 'elena.editada@dentalclinic.com',
       first_name: 'Elena',
       last_name: 'Vargas',
+      phone: '',
       role: 'ODONTOLOGO',
       is_active: false,
     })
@@ -71,6 +78,8 @@ describe('SettingsPage staff management', () => {
         { code: 'patients.view', label: 'Ver pacientes', group: 'Pacientes' },
         { code: 'patients.create', label: 'Registrar pacientes', group: 'Pacientes' },
         { code: 'patients.edit', label: 'Editar pacientes', group: 'Pacientes' },
+        { code: 'consultations.view', label: 'Ver consultas', group: 'Consultas' },
+        { code: 'consultations.view_all', label: 'Ver consultas de todo el equipo', group: 'Consultas' },
         { code: 'appointments.view', label: 'Ver citas', group: 'Citas' },
         { code: 'appointments.view_all', label: 'Ver citas de todo el equipo', group: 'Citas' },
         { code: 'appointments.create', label: 'Crear citas', group: 'Citas' },
@@ -89,10 +98,21 @@ describe('SettingsPage staff management', () => {
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('opens with the clinic profile selected', async () => {
+    renderPage()
+
+    expect(screen.getByRole('button', { name: /Perfil de la clínica/ })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: /Gestión de Staff/ })).not.toHaveAttribute('aria-current')
+    expect(await screen.findByRole('heading', { name: 'Perfil de la clínica' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Gestión de Staff' })).not.toBeInTheDocument()
   })
 
   it('shows an empty state when no staff users exist', async () => {
     renderPage()
+    openStaff()
 
     expect(await screen.findByText('Aún no hay miembros registrados.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Añadir miembro' })).toBeInTheDocument()
@@ -100,7 +120,6 @@ describe('SettingsPage staff management', () => {
 
   it('opens operational panels only when selected and saves the clinic profile', async () => {
     renderPage()
-    fireEvent.click(screen.getByRole('button', { name: /Perfil de la clínica/ }))
     expect(await screen.findByRole('heading', { name: 'Perfil de la clínica' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Nombre de la clínica'), { target: { value: 'Clínica Argüello' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
@@ -133,6 +152,7 @@ describe('SettingsPage staff management', () => {
       },
     ])
     renderPage()
+    openStaff()
 
     expect(await screen.findByText('Ana Pérez')).toBeInTheDocument()
     expect(screen.getByText('Bruno López')).toBeInTheDocument()
@@ -178,8 +198,51 @@ describe('SettingsPage staff management', () => {
     expect(screen.getByLabelText('Ver citas de todo el equipo')).not.toBeChecked()
   })
 
+  it('[HU-11] shows the protected profile photo in the staff list', async () => {
+    const avatarBlob = new Blob(['avatar'], { type: 'image/png' })
+    userService.getUserAvatarContent.mockResolvedValue(avatarBlob)
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:staff-avatar'),
+      revokeObjectURL: vi.fn(),
+    })
+    userService.listUsers.mockResolvedValue([{
+      id: 8,
+      email: 'sara@dentalclinic.com',
+      first_name: 'Sara',
+      last_name: 'López',
+      phone: '+505 8555 4444',
+      avatar_url: '/api/auth/users/8/avatar/',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    expect(await screen.findByRole('img', { name: 'Foto de Sara López' })).toHaveAttribute(
+      'src',
+      'blob:staff-avatar',
+    )
+  })
+
+  it('keeps team consultation visibility dependent on base consultation access', async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByRole('button', { name: /Permisos por rol/ }))
+    expect(await screen.findByLabelText('Ver consultas de todo el equipo')).not.toBeChecked()
+
+    fireEvent.click(screen.getByLabelText('Ver consultas de todo el equipo'))
+    expect(screen.getByLabelText('Ver consultas')).toBeChecked()
+    expect(screen.getByLabelText('Ver consultas de todo el equipo')).toBeChecked()
+
+    fireEvent.click(screen.getByLabelText('Ver consultas'))
+    expect(screen.getByLabelText('Ver consultas')).not.toBeChecked()
+    expect(screen.getByLabelText('Ver consultas de todo el equipo')).not.toBeChecked()
+  })
+
   it('registers a member and adds it to the staff list', async () => {
     renderPage()
+    openStaff()
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir miembro' }))
     fillForm()
 
@@ -191,10 +254,65 @@ describe('SettingsPage staff management', () => {
       email: 'nuevo@dentalclinic.com',
       first_name: 'Lucía',
       last_name: 'Méndez',
+      phone: '',
       role: 'ODONTOLOGO',
       password: 'ContraseñaSegura123!',
       confirm_password: 'ContraseñaSegura123!',
     })
+  })
+
+  it('[HU-11] lets an administrator create a member with phone and photo', async () => {
+    vi.stubGlobal('URL', {
+      ...URL,
+      createObjectURL: vi.fn(() => 'blob:new-staff-avatar'),
+      revokeObjectURL: vi.fn(),
+    })
+    renderPage()
+    openStaff()
+    fireEvent.click(await screen.findByRole('button', { name: 'Añadir miembro' }))
+    fillForm()
+    const avatar = new File(['avatar'], 'sara.png', { type: 'image/png' })
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '+505 8555 4444' } })
+    fireEvent.change(screen.getByLabelText('Foto de perfil'), { target: { files: [avatar] } })
+
+    expect(screen.getByRole('img', { name: 'Vista previa de la foto del miembro' })).toHaveAttribute(
+      'src',
+      'blob:new-staff-avatar',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar usuario' }))
+
+    await waitFor(() => expect(userService.createUser).toHaveBeenCalledWith(
+      'access-token',
+      expect.objectContaining({ phone: '+505 8555 4444', avatar }),
+    ))
+  })
+
+  it('[HU-11] lets an administrator remove a staff profile photo', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '+505 8111 2222',
+      avatar_url: '/api/auth/users/7/avatar/',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    userService.getUserAvatarContent.mockRejectedValue(new Error('imagen no disponible'))
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    expect(screen.getByDisplayValue('+505 8111 2222')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar foto' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      expect.objectContaining({ remove_avatar: true }),
+    ))
   })
 
   it('shows the duplicate warning returned by the API', async () => {
@@ -202,6 +320,7 @@ describe('SettingsPage staff management', () => {
       new Error('Ya existe un usuario con este correo electrónico.'),
     )
     renderPage()
+    openStaff()
     fireEvent.click(await screen.findByRole('button', { name: 'Añadir miembro' }))
     fillForm()
 
@@ -227,10 +346,12 @@ describe('SettingsPage staff management', () => {
       email: 'elena.editada@dentalclinic.com',
       first_name: 'Elena',
       last_name: 'Vargas',
+      phone: '',
       role: 'ODONTOLOGO',
       is_active: true,
     })
     renderPage()
+    openStaff()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
     expect(screen.getByRole('dialog', { name: 'Editar miembro' })).toBeInTheDocument()
@@ -246,6 +367,7 @@ describe('SettingsPage staff management', () => {
       email: 'elena.editada@dentalclinic.com',
       first_name: 'Elena',
       last_name: 'Vargas',
+      phone: '',
       role: 'ODONTOLOGO',
       is_active: true,
     })
@@ -257,10 +379,12 @@ describe('SettingsPage staff management', () => {
       email: 'elena@dentalclinic.com',
       first_name: 'Elena',
       last_name: 'Méndez',
+      phone: '',
       role: 'RECEPCIONISTA',
       is_active: true,
     }])
     renderPage()
+    openStaff()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
     fireEvent.click(screen.getByLabelText('Usuario activo'))
@@ -272,6 +396,7 @@ describe('SettingsPage staff management', () => {
       email: 'elena@dentalclinic.com',
       first_name: 'Elena',
       last_name: 'Méndez',
+      phone: '',
       role: 'RECEPCIONISTA',
       is_active: false,
     })
