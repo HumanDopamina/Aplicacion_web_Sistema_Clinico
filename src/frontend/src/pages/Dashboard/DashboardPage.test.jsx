@@ -2,13 +2,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listAppointments } from '../../services/appointmentService'
-import { listPatients, listRecentConsultations } from '../../services/patientService'
+import * as patientService from '../../services/patientService'
 import DashboardPage from './DashboardPage'
 
 vi.mock('../../services/appointmentService')
 vi.mock('../../services/patientService', async (importOriginal) => ({
   ...await importOriginal(),
   listPatients: vi.fn(),
+  listPatientDashboardSummary: vi.fn(),
   listRecentConsultations: vi.fn(),
 }))
 
@@ -28,9 +29,13 @@ const recentConsultation = {
 
 describe('DashboardPage', () => {
   beforeEach(() => {
-    listPatients.mockResolvedValue([])
+    patientService.listPatients.mockResolvedValue([])
+    patientService.listPatientDashboardSummary.mockResolvedValue({
+      total_patients: 0,
+      recently_attended: [],
+    })
     listAppointments.mockResolvedValue([])
-    listRecentConsultations.mockResolvedValue([])
+    patientService.listRecentConsultations.mockResolvedValue([])
   })
   afterEach(() => {
     cleanup()
@@ -53,34 +58,26 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('heading', { name: 'Consultas recientes' })).toBeInTheDocument()
     expect(await screen.findByText('No hay consultas recientes.')).toBeInTheDocument()
     expect(screen.getByText('Pacientes recientes')).toBeInTheDocument()
-    expect(await screen.findByText('Aún no hay pacientes registrados.')).toBeInTheDocument()
+    expect(screen.getByText('Últimas atenciones')).toBeInTheDocument()
+    expect(await screen.findByText('No hay pacientes atendidos recientemente.')).toBeInTheDocument()
+    expect(screen.getByText('Las consultas completadas aparecerán aquí.')).toBeInTheDocument()
     expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('0')
     expect(screen.queryByText('Leonel Hernández')).not.toBeInTheDocument()
   })
 
-  it('shows the total and recently registered patients returned by the API', async () => {
-    listPatients.mockResolvedValue([{
-      id: 1,
-      code: 'PAC-00001',
-      first_name: 'leonel alberto',
-      last_name: 'hernandez',
-      second_last_name: 'alvarez',
-      full_name: 'leonel alberto hernandez alvarez',
-      birth_place: 'El Viejo, Chinandega',
-      address: 'Iglesia San José',
-      national_id: '3423424242234',
-      phone: '354545454',
-      email: 'leo3@gmail.com',
-      emergency_contact_name: 'Carlos',
-      emergency_relationship: 'Hermano',
-      emergency_phone: '343434',
-      gender: 'MASCULINO',
-      date_of_birth: '2003-07-29',
-      is_active: true,
-      created_at: '2026-08-08T12:00:00Z',
-      updated_at: '2026-08-08T12:00:00Z',
-      registered_by: 2,
-    }])
+  it('shows the total and recently attended patients from the compact summary', async () => {
+    patientService.listPatientDashboardSummary.mockResolvedValue({
+      total_patients: 12,
+      recently_attended: [{
+        id: 1,
+        code: 'PAC-00001',
+        first_name: 'leonel alberto',
+        last_name: 'hernandez',
+        full_name: 'leonel alberto hernandez alvarez',
+        last_attended_date: '2026-08-08',
+        last_attended_time: '12:00:00',
+      }],
+    })
 
     render(
       <MemoryRouter>
@@ -90,20 +87,26 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByText('leonel alberto hernandez alvarez')).toBeInTheDocument()
     expect(screen.getByText('PAC-00001')).toBeInTheDocument()
-    expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('1')
+    expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('12')
     expect(screen.getByRole('link', { name: 'Ver expediente de leonel alberto hernandez alvarez' })).toHaveAttribute('href', '/pacientes/1')
-    expect(screen.queryByText('Aún no hay pacientes registrados.')).not.toBeInTheDocument()
+    expect(screen.queryByText('No hay pacientes atendidos recientemente.')).not.toBeInTheDocument()
+    expect(patientService.listPatients).not.toHaveBeenCalled()
   })
 
   it('shows general consultations and recent patients to an administrator', async () => {
-    listRecentConsultations.mockResolvedValue([recentConsultation])
-    listPatients.mockResolvedValue([{
-      id: 8,
-      code: 'PAC-00008',
-      first_name: 'Carlos',
-      last_name: 'Mendoza',
-      full_name: 'Carlos Mendoza',
-    }])
+    patientService.listRecentConsultations.mockResolvedValue([recentConsultation])
+    patientService.listPatientDashboardSummary.mockResolvedValue({
+      total_patients: 1,
+      recently_attended: [{
+        id: 8,
+        code: 'PAC-00008',
+        first_name: 'Carlos',
+        last_name: 'Mendoza',
+        full_name: 'Carlos Mendoza',
+        last_attended_date: '2026-08-09',
+        last_attended_time: '09:00:00',
+      }],
+    })
 
     render(
       <MemoryRouter>
@@ -123,7 +126,7 @@ describe('DashboardPage', () => {
   })
 
   it('shows only personal recent consultations in the dentist side column', async () => {
-    listRecentConsultations.mockResolvedValue([recentConsultation])
+    patientService.listRecentConsultations.mockResolvedValue([recentConsultation])
 
     render(
       <MemoryRouter>
@@ -164,7 +167,7 @@ describe('DashboardPage', () => {
   })
 
   it('shows both summaries to reception with team consultation visibility', async () => {
-    listRecentConsultations.mockResolvedValue([recentConsultation])
+    patientService.listRecentConsultations.mockResolvedValue([recentConsultation])
 
     render(
       <MemoryRouter>
@@ -184,7 +187,7 @@ describe('DashboardPage', () => {
   })
 
   it('shows a separate error state when recent consultations cannot be loaded', async () => {
-    listRecentConsultations.mockRejectedValue(new Error('No se pudieron cargar las consultas.'))
+    patientService.listRecentConsultations.mockRejectedValue(new Error('No se pudieron cargar las consultas.'))
 
     render(
       <MemoryRouter>
@@ -194,6 +197,23 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('No se pudieron cargar las consultas.')
     expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
+  })
+
+  it('shows an independent error when the patient dashboard summary cannot be loaded', async () => {
+    patientService.listPatientDashboardSummary.mockRejectedValue(
+      new Error('No se pudieron cargar los pacientes recientes.'),
+    )
+
+    render(
+      <MemoryRouter>
+        <DashboardPage user={{ first_name: 'Arguello', role: 'ADMINISTRADOR' }} accessToken="access-token" />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'No se pudieron cargar los pacientes recientes.',
+    )
+    expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('—')
   })
 
   it('opens the full patient record page from the dashboard action', () => {

@@ -199,6 +199,16 @@ class RecentConsultationSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class RecentlyAttendedPatientSerializer(serializers.Serializer):
+    id = serializers.IntegerField(source="patient_id", read_only=True)
+    code = serializers.CharField(source="patient.code", read_only=True)
+    first_name = serializers.CharField(source="patient.first_name", read_only=True)
+    last_name = serializers.CharField(source="patient.last_name", read_only=True)
+    full_name = serializers.CharField(source="patient.full_name", read_only=True)
+    last_attended_date = serializers.DateField(source="date", read_only=True)
+    last_attended_time = serializers.TimeField(source="time", read_only=True, allow_null=True)
+
+
 class OdontogramVersionSerializer(serializers.ModelSerializer):
     professional_name = serializers.SerializerMethodField()
     consultation_date = serializers.DateField(source="consultation.date", read_only=True)

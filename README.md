@@ -198,6 +198,7 @@ Los enlaces de recuperación:
 | Método | Endpoint | Autorización | Descripción |
 |---|---|---:|---|
 | `GET` | `/api/patients/` | `patients.view` | Lista pacientes y permite buscar con `?search=`. |
+| `GET` | `/api/patients/dashboard-summary/` | `patients.view` | Devuelve el total y hasta cuatro pacientes distintos ordenados por su última consulta completada. |
 | `POST` | `/api/patients/` | `patients.create` | Registra un paciente, genera su código y crea `clinical_record`. |
 | `GET` | `/api/patients/{id}/` | `patients.view` | Abre la identidad y el expediente clínico completo. |
 | `PATCH` | `/api/patients/{id}/` | `patients.edit` | Actualiza datos personales y el expediente clínico anidado. |
@@ -292,7 +293,7 @@ La pestaña **Consultas** muestra el historial clínico persistido del paciente 
 
 El administrador gestiona `consultations.view`, `consultations.view_all`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. `consultations.view_all` no se asigna por defecto y amplía únicamente el resumen de consultas recientes del dashboard a todo el equipo. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
 
-En el dashboard, Odontología ve sus cuatro consultas más recientes en lugar de **Pacientes recientes**. Administración ve consultas generales y pacientes recientes en tarjetas apiladas. Recepción conserva pacientes recientes y solo incorpora el resumen general de consultas cuando su preset incluye `consultations.view_all`.
+En el dashboard, Odontología ve sus cuatro consultas más recientes en lugar de **Pacientes recientes**. Para Administración y Recepción con `patients.view`, **Pacientes recientes** muestra hasta cuatro pacientes distintos ordenados por su última consulta completada; Administración conserva además las consultas generales y Recepción solo incorpora ese resumen de consultas cuando `consultations.view_all` está habilitado.
 
 ### Odontogramas por consulta
 

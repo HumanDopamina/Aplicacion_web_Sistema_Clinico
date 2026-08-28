@@ -550,6 +550,167 @@ class RecentConsultationApiTests(APITestCase):
         )
 
 
+class PatientDashboardSummaryApiTests(APITestCase):
+    url = "/api/patients/dashboard-summary/"
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="admin-patient-summary@dentalclinic.com",
+            password="ContraseñaAdmin123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.receptionist = User.objects.create_user(
+            email="reception-patient-summary@dentalclinic.com",
+            password="ContraseñaRecepcion123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.dentist = User.objects.create_user(
+            email="dentist-patient-summary@dentalclinic.com",
+            password="ContraseñaDentist123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.patient_counter = 0
+
+    def create_patient(self, first_name, *, is_active=True):
+        self.patient_counter += 1
+        return Patient.objects.create(
+            first_name=first_name,
+            last_name="Paciente",
+            birth_place="Managua",
+            national_id=f"001-010190-{self.patient_counter:04d}A",
+            gender=Patient.Gender.FEMENINO,
+            date_of_birth="1990-01-01",
+            registered_by=self.admin,
+            is_active=is_active,
+        )
+
+    def create_consultation(
+        self,
+        patient,
+        date,
+        *,
+        time="09:00:00",
+        status=Consultation.Status.COMPLETED,
+        professional=None,
+    ):
+        return Consultation.objects.create(
+            patient=patient,
+            professional=professional or self.dentist,
+            date=date,
+            time=time,
+            consultation_type=Consultation.Type.GENERAL,
+            summary="Atención clínica.",
+            status=status,
+        )
+
+    def test_returns_total_and_a_compact_recently_attended_patient_contract(self):
+        attended = self.create_patient("Ana")
+        self.create_patient("Sin consulta")
+        self.create_consultation(attended, "2001-01-10", time="10:30:00")
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["total_patients"], 2)
+        self.assertEqual(len(response.data["recently_attended"]), 1)
+        summary = response.data["recently_attended"][0]
+        self.assertEqual(
+            set(summary),
+            {
+                "id", "code", "first_name", "last_name", "full_name",
+                "last_attended_date", "last_attended_time",
+            },
+        )
+        self.assertEqual(summary["id"], attended.pk)
+        self.assertEqual(summary["code"], attended.code)
+        self.assertEqual(summary["full_name"], "Ana Paciente")
+        self.assertEqual(summary["last_attended_date"], "2001-01-10")
+        self.assertEqual(summary["last_attended_time"], "10:30:00")
+
+    def test_uses_only_each_patients_latest_non_future_completed_consultation(self):
+        repeated = self.create_patient("Repetida")
+        completed = self.create_patient("Completada")
+        in_progress = self.create_patient("En progreso")
+        cancelled = self.create_patient("Cancelada")
+        future = self.create_patient("Futura")
+        self.create_consultation(repeated, "2001-01-05", time="15:00:00")
+        self.create_consultation(repeated, "2001-01-10", time=None)
+        self.create_consultation(repeated, "2001-01-10", time="08:00:00")
+        self.create_consultation(completed, "2001-01-09", time="12:00:00")
+        self.create_consultation(
+            in_progress,
+            "2001-01-12",
+            status=Consultation.Status.IN_PROGRESS,
+        )
+        self.create_consultation(
+            cancelled,
+            "2001-01-13",
+            status=Consultation.Status.CANCELLED,
+        )
+        self.create_consultation(future, "2999-01-01")
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        summaries = response.data["recently_attended"]
+        self.assertEqual([item["id"] for item in summaries], [repeated.pk, completed.pk])
+        self.assertEqual(summaries[0]["last_attended_date"], "2001-01-10")
+        self.assertEqual(summaries[0]["last_attended_time"], "08:00:00")
+
+    def test_limits_results_to_four_and_keeps_recently_attended_inactive_patients(self):
+        patients = []
+        for day in range(1, 6):
+            patient = self.create_patient(
+                f"Paciente {day}",
+                is_active=day != 5,
+            )
+            self.create_consultation(patient, f"2001-01-{day:02d}")
+            patients.append(patient)
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in response.data["recently_attended"]],
+            [patient.pk for patient in reversed(patients[1:])],
+        )
+
+    def test_patients_view_grants_global_summary_without_consultation_scope(self):
+        first = self.create_patient("Primera")
+        second = self.create_patient("Segunda")
+        other_dentist = User.objects.create_user(
+            email="other-dentist-summary@dentalclinic.com",
+            password="ContraseñaDentist123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.create_consultation(first, "2001-01-01", professional=self.dentist)
+        self.create_consultation(second, "2001-01-02", professional=other_dentist)
+        preset = RolePermissionPreset.objects.get(role=User.Role.RECEPCIONISTA)
+        preset.permissions = ["patients.view"]
+        preset.save(update_fields=["permissions"])
+        self.client.force_authenticate(self.receptionist)
+
+        allowed = self.client.get(self.url)
+
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in allowed.data["recently_attended"]],
+            [second.pk, first.pk],
+        )
+
+        preset.permissions = []
+        preset.save(update_fields=["permissions"])
+        denied = self.client.get(self.url)
+        self.assertEqual(denied.status_code, 403)
+
+        self.client.force_authenticate(user=None)
+        unauthenticated = self.client.get(self.url)
+        self.assertEqual(unauthenticated.status_code, 401)
+
+
 class ConsultationApiTests(APITestCase):
     def setUp(self):
         self.admin = User.objects.create_user(

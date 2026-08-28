@@ -214,7 +214,13 @@ class Consultation(models.Model):
 
     class Meta:
         ordering = ("-date", "-created_at")
-        indexes = (models.Index(fields=("patient", "-date")),)
+        indexes = (
+            models.Index(fields=("patient", "-date")),
+            models.Index(
+                fields=("status", "patient", "-date", "-time"),
+                name="consult_st_pat_dt_tm_idx",
+            ),
+        )
 
     def save(self, *args, **kwargs):
         if not self.professional_name_snapshot and self.professional_id:

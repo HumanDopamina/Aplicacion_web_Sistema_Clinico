@@ -7,6 +7,11 @@ export const listPatients = (access, search = '') => {
   return apiRequest(`/api/patients/${query}`, { headers: authorization(access) })
 }
 
+export const listPatientDashboardSummary = (access) => apiRequest(
+  '/api/patients/dashboard-summary/',
+  { headers: authorization(access) },
+)
+
 export const createPatient = (access, patient) => apiRequest('/api/patients/', {
   method: 'POST',
   body: JSON.stringify(patient),

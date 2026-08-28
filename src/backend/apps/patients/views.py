@@ -1,4 +1,5 @@
-from django.db.models import Q
+from django.db.models import F, Q, Window
+from django.db.models.functions import RowNumber
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils.http import content_disposition_header
@@ -9,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.users.permissions import HasCapability, user_has_permission
+from apps.clinics.availability import clinic_today
 
 from .models import Consultation, OdontogramVersion, Patient, PatientDocument
 from .odontograms import OdontogramConflict
@@ -21,6 +23,7 @@ from .serializers import (
     PatientDocumentBatchUploadSerializer,
     PatientDocumentSerializer,
     RecentConsultationSerializer,
+    RecentlyAttendedPatientSerializer,
 )
 
 
@@ -72,6 +75,42 @@ class RecentConsultationListView(generics.ListAPIView):
         if not user_has_permission(self.request.user, "consultations.view_all"):
             queryset = queryset.filter(professional=self.request.user)
         return queryset.order_by("-date", "-time", "-created_at")[:4]
+
+
+class PatientDashboardSummaryView(APIView):
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "patients.view"}
+
+    def get(self, request):
+        latest_attendance_order = (
+            F("date").desc(),
+            F("time").desc(nulls_last=True),
+            F("created_at").desc(),
+            F("pk").desc(),
+        )
+        recently_attended = (
+            Consultation.objects.filter(
+                status=Consultation.Status.COMPLETED,
+                date__lte=clinic_today(),
+            )
+            .select_related("patient")
+            .annotate(
+                patient_rank=Window(
+                    expression=RowNumber(),
+                    partition_by=(F("patient_id"),),
+                    order_by=latest_attendance_order,
+                ),
+            )
+            .filter(patient_rank=1)
+            .order_by(*latest_attendance_order)[:4]
+        )
+        return Response({
+            "total_patients": Patient.objects.count(),
+            "recently_attended": RecentlyAttendedPatientSerializer(
+                recently_attended,
+                many=True,
+            ).data,
+        })
 
 
 class PatientConsultationListView(generics.ListCreateAPIView):

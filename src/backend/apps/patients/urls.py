@@ -7,6 +7,7 @@ from .views import (
     PatientOdontogramVersionListView,
     PatientConsultationDetailView,
     PatientConsultationListView,
+    PatientDashboardSummaryView,
     PatientDetailView,
     PatientDocumentCategoryListView,
     PatientDocumentContentView,
@@ -28,6 +29,11 @@ urlpatterns = [
         "consultations/recent/",
         RecentConsultationListView.as_view(),
         name="recent-consultation-list",
+    ),
+    path(
+        "dashboard-summary/",
+        PatientDashboardSummaryView.as_view(),
+        name="patient-dashboard-summary",
     ),
     path("<int:pk>/", PatientDetailView.as_view(), name="patient-detail"),
     path(

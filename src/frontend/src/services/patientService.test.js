@@ -54,6 +54,14 @@ describe('patientService', () => {
     })
   })
 
+  it('loads the compact patient dashboard summary with authentication', () => {
+    expect(patientService.listPatientDashboardSummary).toBeTypeOf('function')
+    patientService.listPatientDashboardSummary('token')
+    expect(apiRequest).toHaveBeenCalledWith('/api/patients/dashboard-summary/', {
+      headers: { Authorization: 'Bearer token' },
+    })
+  })
+
   it('loads the recent consultation summary with authentication', () => {
     listRecentConsultations('token')
     expect(apiRequest).toHaveBeenCalledWith('/api/patients/consultations/recent/', {
