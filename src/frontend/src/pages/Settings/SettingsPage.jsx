@@ -48,6 +48,7 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
   const [avatar, setAvatar] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState('')
   const [removeAvatar, setRemoveAvatar] = useState(false)
+  const [passwordChangeOpen, setPasswordChangeOpen] = useState(false)
 
   useEffect(() => {
     if (!avatar) {
@@ -64,9 +65,33 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
     setForm((current) => ({ ...current, [name]: type === 'checkbox' ? checked : value }))
   }
 
+  const togglePasswordChange = () => {
+    setError('')
+    setForm((current) => {
+      if (!passwordChangeOpen) {
+        return { ...current, new_password: '', confirm_password: '' }
+      }
+      const next = { ...current }
+      delete next.new_password
+      delete next.confirm_password
+      return next
+    })
+    setPasswordChangeOpen((current) => !current)
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     setError('')
+    if (isEditing && passwordChangeOpen) {
+      if (!form.new_password || !form.confirm_password) {
+        setError('Completa ambos campos de contraseña.')
+        return
+      }
+      if (form.new_password !== form.confirm_password) {
+        setError('Las contraseñas no coinciden.')
+        return
+      }
+    }
     setSaving(true)
     try {
       const payload = { ...form }
@@ -125,17 +150,41 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
             </select>
           </label>
           {isEditing ? (
-            <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
-              <input type="checkbox" name="is_active" checked={form.is_active} onChange={update} className="h-4 w-4 accent-blue-700" />
-              Usuario activo
-            </label>
+            <>
+              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
+                <input type="checkbox" name="is_active" checked={form.is_active} onChange={update} className="h-4 w-4 accent-blue-700" />
+                Usuario activo
+              </label>
+              <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 sm:col-span-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Acceso</p>
+                    <p className="mt-0.5 text-xs text-slate-500">La contraseña actual se conserva si no solicitas un cambio.</p>
+                  </div>
+                  <button type="button" aria-expanded={passwordChangeOpen} aria-controls="staff-password-fields" onClick={togglePasswordChange} className="self-start rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100">
+                    {passwordChangeOpen ? 'Cancelar cambio de contraseña' : 'Cambiar contraseña'}
+                  </button>
+                </div>
+                {passwordChangeOpen ? (
+                  <div id="staff-password-fields" className="mt-4 grid gap-3 border-t border-blue-100 pt-4 sm:grid-cols-2">
+                    <p id="staff-password-warning" className="text-xs leading-5 text-slate-600 sm:col-span-2">Al guardar la nueva contraseña, se cerrarán las sesiones activas de este usuario.</p>
+                    <label className="grid gap-1.5 text-sm font-medium text-slate-700">Nueva contraseña
+                      <input required type="password" name="new_password" value={form.new_password || ''} onChange={update} autoComplete="new-password" aria-describedby="staff-password-warning" className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+                    </label>
+                    <label className="grid gap-1.5 text-sm font-medium text-slate-700">Confirmar nueva contraseña
+                      <input required type="password" name="confirm_password" value={form.confirm_password || ''} onChange={update} autoComplete="new-password" aria-describedby="staff-password-warning" className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            </>
           ) : (
             <>
               <label className="grid gap-1.5 text-sm font-medium text-slate-700">Contraseña
-                <input required type="password" name="password" value={form.password} onChange={update} className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+                <input required type="password" name="password" value={form.password} onChange={update} autoComplete="new-password" className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
               </label>
               <label className="grid gap-1.5 text-sm font-medium text-slate-700">Confirmar contraseña
-                <input required type="password" name="confirm_password" value={form.confirm_password} onChange={update} className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+                <input required type="password" name="confirm_password" value={form.confirm_password} onChange={update} autoComplete="new-password" className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
               </label>
             </>
           )}

@@ -272,7 +272,7 @@ Las fotografías admiten PNG, JPEG o WebP de hasta 2 MB. Se guardan fuera del di
 5. El usuario creado queda disponible inmediatamente para iniciar sesión.
 6. Abre **Permisos por rol** para definir los accesos globales de recepcionistas y odontólogos.
 
-Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos sin mostrar ni modificar la contraseña. HU-07 permite desactivar la cuenta sin eliminarla, HU-08 asigna el rol y sus permisos, HU-09 presenta todos los usuarios con su rol y estado, y HU-11 incorpora teléfono y fotografía privada tanto al alta como a la edición administrativa.
+Como parte de HU-06, **Editar** permite cambiar de forma persistente los datos sin revelar la contraseña actual. La sección **Acceso** permite asignar una nueva contraseña tras confirmarla; el sistema aplica la política de contraseñas y revoca las sesiones anteriores del miembro. Si la sección permanece cerrada, la contraseña y sus sesiones no se modifican. HU-07 permite desactivar la cuenta sin eliminarla, HU-08 asigna el rol y sus permisos, HU-09 presenta todos los usuarios con su rol y estado, y HU-11 incorpora teléfono y fotografía privada tanto al alta como a la edición administrativa.
 
 La aplicación rechaza correos ya registrados, incluso si se escriben usando una combinación diferente de mayúsculas y minúsculas. Los usuarios sin rol administrador no pueden acceder a esta pantalla ni a sus endpoints.
 

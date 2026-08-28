@@ -373,6 +373,73 @@ describe('SettingsPage staff management', () => {
     })
   })
 
+  it('[HU-06] lets an administrator assign a new staff password', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }))
+    expect(screen.getByText(/cerrarán las sesiones activas/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Nueva contraseña'), {
+      target: { value: 'NuevaClaveSegura456!' },
+    })
+    fireEvent.change(screen.getByLabelText('Confirmar nueva contraseña'), {
+      target: { value: 'NuevaClaveSegura456!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      {
+        email: 'elena@dentalclinic.com',
+        first_name: 'Elena',
+        last_name: 'Méndez',
+        phone: '',
+        role: 'RECEPCIONISTA',
+        is_active: true,
+        new_password: 'NuevaClaveSegura456!',
+        confirm_password: 'NuevaClaveSegura456!',
+      },
+    ))
+  })
+
+  it('[HU-06] rejects mismatched staff passwords before calling the API', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }))
+    fireEvent.change(screen.getByLabelText('Nueva contraseña'), {
+      target: { value: 'NuevaClaveSegura456!' },
+    })
+    fireEvent.change(screen.getByLabelText('Confirmar nueva contraseña'), {
+      target: { value: 'OtraClaveSegura789!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Las contraseñas no coinciden.')
+    expect(userService.updateUser).not.toHaveBeenCalled()
+  })
+
   it('[HU-07] deactivates a member and updates the visible status', async () => {
     userService.listUsers.mockResolvedValue([{
       id: 7,

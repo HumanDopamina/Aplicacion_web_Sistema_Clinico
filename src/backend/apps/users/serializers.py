@@ -5,6 +5,8 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
+from django.db.models import F
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
@@ -340,6 +342,16 @@ class UserAdminSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
 class UserAdminUpdateSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     remove_avatar = serializers.BooleanField(write_only=True, required=False, default=False)
+    new_password = serializers.CharField(
+        write_only=True,
+        required=False,
+        trim_whitespace=False,
+    )
+    confirm_password = serializers.CharField(
+        write_only=True,
+        required=False,
+        trim_whitespace=False,
+    )
 
     class Meta:
         model = User
@@ -354,6 +366,8 @@ class UserAdminUpdateSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
             "remove_avatar",
             "role",
             "is_active",
+            "new_password",
+            "confirm_password",
         )
         read_only_fields = ("id",)
         extra_kwargs = {"avatar": {"write_only": True, "required": False}}
@@ -366,6 +380,40 @@ class UserAdminUpdateSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
                 "Ya existe un usuario con este correo electrónico."
             )
         return email
+
+    def validate(self, attrs):
+        has_new_password = "new_password" in attrs
+        has_confirmation = "confirm_password" in attrs
+        if has_new_password != has_confirmation:
+            missing_field = "confirm_password" if has_new_password else "new_password"
+            raise serializers.ValidationError({
+                missing_field: "Completa ambos campos de contraseña.",
+            })
+        if not has_new_password:
+            return attrs
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({
+                "confirm_password": "Las contraseñas no coinciden.",
+            })
+        try:
+            validate_password(attrs["new_password"], user=self.instance)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"new_password": exc.messages}) from exc
+        return attrs
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        new_password = validated_data.pop("new_password", None)
+        validated_data.pop("confirm_password", None)
+        updated = super().update(instance, validated_data)
+        if new_password is not None:
+            updated.set_password(new_password)
+            type(updated).objects.filter(pk=updated.pk).update(
+                password=updated.password,
+                token_version=F("token_version") + 1,
+            )
+            updated.refresh_from_db(fields=["password", "token_version"])
+        return updated
 
 
 class RolePermissionPresetSerializer(serializers.ModelSerializer):

@@ -725,6 +725,105 @@ class UserRegistrationApiTests(APITestCase):
         self.assertTrue(member.check_password("ContraseñaOriginal123!"))
         self.assertNotIn("password", response.data)
 
+    def test_hu06_administrator_changes_password_and_revokes_existing_sessions(self):
+        member = User.objects.create_user(
+            email="cambiar-clave@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        login = self.client.post(
+            reverse("users:login"),
+            {"email": member.email, "password": "ContraseñaOriginal123!"},
+            format="json",
+        )
+        old_access = login.data["access"]
+        old_refresh = login.data["refresh"]
+        original_token_version = member.token_version
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+            {
+                "new_password": "NuevaClaveSegura456!",
+                "confirm_password": "NuevaClaveSegura456!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        member.refresh_from_db()
+        self.assertTrue(member.check_password("NuevaClaveSegura456!"))
+        self.assertEqual(member.token_version, original_token_version + 1)
+        self.assertNotIn("new_password", response.data)
+        self.assertNotIn("confirm_password", response.data)
+
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {old_access}")
+        revoked_session = self.client.get(reverse("users:current-user"))
+        self.assertEqual(revoked_session.status_code, 401)
+
+        self.client.credentials()
+        refreshed = self.client.post(
+            reverse("users:token-refresh"),
+            {"refresh": old_refresh},
+            format="json",
+        )
+        self.assertEqual(refreshed.status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refreshed.data['access']}")
+        refreshed_session = self.client.get(reverse("users:current-user"))
+        self.assertEqual(refreshed_session.status_code, 401)
+
+    def test_hu06_password_change_rejects_mismatch_without_mutating_user(self):
+        member = User.objects.create_user(
+            email="clave-distinta@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        original_token_version = member.token_version
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+            {
+                "new_password": "NuevaClaveSegura456!",
+                "confirm_password": "OtraClaveSegura789!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("confirm_password", response.data)
+        member.refresh_from_db()
+        self.assertTrue(member.check_password("ContraseñaOriginal123!"))
+        self.assertEqual(member.token_version, original_token_version)
+
+    def test_hu06_password_change_rejects_weak_or_incomplete_credentials(self):
+        member = User.objects.create_user(
+            email="clave-invalida@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.client.force_authenticate(self.admin)
+        url = reverse("users:user-detail", kwargs={"pk": member.pk})
+
+        weak_response = self.client.patch(
+            url,
+            {"new_password": "123", "confirm_password": "123"},
+            format="json",
+        )
+        incomplete_response = self.client.patch(
+            url,
+            {"new_password": "NuevaClaveSegura456!"},
+            format="json",
+        )
+
+        self.assertEqual(weak_response.status_code, 400)
+        self.assertIn("new_password", weak_response.data)
+        self.assertEqual(incomplete_response.status_code, 400)
+        self.assertIn("confirm_password", incomplete_response.data)
+        member.refresh_from_db()
+        self.assertTrue(member.check_password("ContraseñaOriginal123!"))
+
     def test_hu07_deactivation_preserves_user_and_blocks_login(self):
         password = "ContraseñaOriginal123!"
         member = User.objects.create_user(

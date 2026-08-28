@@ -69,6 +69,8 @@ describe('userService', () => {
       last_name: 'Vargas',
       role: 'ODONTOLOGO',
       is_active: false,
+      new_password: 'NuevaClaveSegura456!',
+      confirm_password: 'NuevaClaveSegura456!',
     }
 
     await updateUser('access-token', 4, changes)
