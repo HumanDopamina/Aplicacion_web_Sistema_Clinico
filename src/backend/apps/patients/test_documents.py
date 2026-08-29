@@ -3,6 +3,7 @@ import tempfile
 from datetime import date
 from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
@@ -23,6 +24,14 @@ def png_file(name="radiografia.png", color="white"):
 def pdf_file(name="informe.pdf", padding=b""):
     content = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n" + padding + b"\n%%EOF"
     return SimpleUploadedFile(name, content, content_type="application/pdf")
+
+
+def corrupt_png_file(name="corrupta.png"):
+    valid = png_file(name)
+    content = bytearray(valid.read())
+    idat_payload = content.index(b"IDAT") + 4
+    content[idat_payload] ^= 0xFF
+    return SimpleUploadedFile(name, bytes(content), content_type="image/png")
 
 
 class PatientDocumentApiTests(APITestCase):
@@ -134,6 +143,41 @@ class PatientDocumentApiTests(APITestCase):
         self.assertIn("PDF", str(response.data))
         self.assertEqual(self.client.get(self.list_url()).data, [])
         self.assertEqual([path for path in self.private_root.rglob("*") if path.is_file()], [])
+
+    def test_corrupted_png_returns_validation_error_without_leaving_files(self):
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.post(
+            self.list_url(),
+            {
+                "files": [corrupt_png_file()],
+                "category": "Radiografía",
+                "document_date": "2026-08-09",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("imagen no es válido", str(response.data))
+        self.assertEqual(self.client.get(self.list_url()).data, [])
+        self.assertEqual([path for path in self.private_root.rglob("*") if path.is_file()], [])
+
+    def test_image_pixel_bomb_returns_validation_error(self):
+        self.client.force_authenticate(self.receptionist)
+
+        with patch("PIL.Image.MAX_IMAGE_PIXELS", 1):
+            response = self.client.post(
+                self.list_url(),
+                {
+                    "files": [png_file()],
+                    "category": "Radiografía",
+                    "document_date": "2026-08-09",
+                },
+                format="multipart",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.client.get(self.list_url()).data, [])
 
     def test_rejects_unsupported_content_extension_size_count_and_batch_size(self):
         self.client.force_authenticate(self.receptionist)

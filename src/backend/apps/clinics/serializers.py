@@ -4,6 +4,8 @@ from pathlib import Path
 from django.db import transaction
 from rest_framework import serializers
 
+from apps.common.file_validation import validate_image_content
+
 from .models import (
     BusinessBreak,
     BusinessHour,
@@ -41,7 +43,16 @@ class ClinicProfileSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Usa una imagen PNG, JPEG o WebP.")
         if Path(logo.name).suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
             raise serializers.ValidationError("La extensión del logo debe ser PNG, JPEG o WebP.")
-        return logo
+        formats = {
+            "image/png": {"PNG"},
+            "image/jpeg": {"JPEG"},
+            "image/webp": {"WEBP"},
+        }
+        return validate_image_content(
+            logo,
+            formats[logo.content_type],
+            "El contenido del logo no es válido.",
+        )
 
     def validate_timezone(self, value):
         try:

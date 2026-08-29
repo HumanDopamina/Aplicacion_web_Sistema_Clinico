@@ -6,8 +6,10 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.utils.deconstruct import deconstructible
-from PIL import Image, UnidentifiedImageError
+from django.utils.module_loading import import_string
 from rest_framework import serializers
+
+from apps.common.file_validation import validate_image_content
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
@@ -45,7 +47,7 @@ class PrivateDocumentStorage(FileSystemStorage):
         return os.path.abspath(self.base_location)
 
 
-private_document_storage = PrivateDocumentStorage()
+private_document_storage = import_string(settings.PRIVATE_MEDIA_STORAGE_BACKEND)()
 
 
 def patient_document_path(instance, filename):
@@ -84,12 +86,13 @@ def validate_document_file(uploaded_file):
             if head != b"%PDF-" or b"%%EOF" not in tail:
                 raise serializers.ValidationError("El contenido del archivo PDF no es válido.")
         else:
-            with Image.open(uploaded_file) as image:
-                if image.format not in IMAGE_FORMATS[content_type]:
-                    raise serializers.ValidationError("El formato real de la imagen no coincide.")
-                image.verify()
-    except (UnidentifiedImageError, OSError, ValueError) as error:
-        raise serializers.ValidationError("El contenido de la imagen no es válido.") from error
+            validate_image_content(
+                uploaded_file,
+                IMAGE_FORMATS[content_type],
+                "El contenido de la imagen no es válido.",
+            )
+    except serializers.ValidationError:
+        raise
     finally:
         uploaded_file.seek(0)
     return uploaded_file
