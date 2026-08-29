@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import logo from '../../assets/logo_login.svg'
-import image from '../../assets/imagen_login.png'
+import image from '../../assets/imagen_login.webp'
 import CustomButton from '../../components/CustomButton'
 import { useAuth } from '../../context/authContextValue'
 import { login } from '../../services/authService'
@@ -27,22 +27,22 @@ export default function LoginPage() {
     finally { setLoading(false) }
   }
   return (
-    <main className="h-screen flex font-sans text-[#252525]">
-      <section className="w-[40%] overflow-hidden">
-        <img src={image} alt="" className="w-full h-full object-cover" />
+    <main className="flex min-h-screen bg-slate-50 font-sans text-slate-900">
+      <section className="hidden overflow-hidden lg:block lg:w-[42%] xl:w-[45%]" aria-hidden="true">
+        <img src={image} alt="" width="720" height="1023" className="h-full min-h-screen w-full object-cover" />
       </section>
-      <section className="flex-1 grid place-items-center px-6 py-10">
+      <section className="grid min-w-0 flex-1 place-items-center px-5 py-10 sm:px-8">
           <form onSubmit={submit} className="flex flex-col w-[min(100%,390px)]" noValidate>
-            <img src={logo} className="w-[175px] self-center mb-2" alt="DentalClinic" />
+            <img src={logo} width="560" height="144" className="mb-2 h-auto w-[210px] self-center" alt="DentalClinic" />
             <p className="self-center text-[#888] text-sm mb-8">Sistema de Gestión Odontológica</p>
             <h1 className="m-0 text-[25px] font-medium">Bienvenido</h1>
             <p className="mt-1 mb-6 text-[#888] text-sm">Ingresa tus credenciales para acceder</p>
             {notice ? <div role="status" className="bg-[#eefaf4] text-[#17603e] px-3 py-2.5 mb-3.5 rounded-md text-sm">{notice}</div> : null}
             {error && <div role="alert" className="bg-[#fff0f0] text-[#a51d1d] px-3 py-2.5 mb-3.5 rounded-md text-sm">{error}</div>}
             <label htmlFor="email" className="text-sm font-bold mb-1.5">Correo electrónico</label>
-            <input id="email" name="email" type="email" value={form.email} onChange={change} placeholder="Enter your email" autoComplete="email" className="px-3 py-3 mb-4 border border-[#d5d5d5] rounded-lg text-sm" />
+            <input id="email" name="email" type="email" value={form.email} onChange={change} placeholder="nombre@clinica.com" autoComplete="email" inputMode="email" spellCheck="false" className="mb-4 rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
             <label htmlFor="password" className="text-sm font-bold mb-1.5">Contraseña</label>
-            <input id="password" name="password" type="password" value={form.password} onChange={change} placeholder="••••••••" autoComplete="current-password" className="px-3 py-3 mb-4 border border-[#d5d5d5] rounded-lg text-sm" />
+            <input id="password" name="password" type="password" value={form.password} onChange={change} placeholder="Tu contraseña…" autoComplete="current-password" className="mb-4 rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
             <div className="flex justify-end items-center mb-10 text-xs">
               <Link to="/recuperar-contrasena" className="text-[#252525] no-underline font-semibold">¿Has olvidado tu contraseña?</Link>
             </div>

@@ -39,6 +39,16 @@ describe('LoginPage', () => {
       '/recuperar-contrasena',
     )
   })
+  it('uses localized input guidance and reserves space for its images', () => {
+    const { container } = renderPage()
+
+    expect(screen.getByLabelText('Correo electrónico')).toHaveAttribute('placeholder', 'nombre@clinica.com')
+    expect(screen.getByLabelText('Correo electrónico')).toHaveAttribute('spellcheck', 'false')
+    expect(screen.getByRole('img', { name: 'DentalClinic' })).toHaveAttribute('width', '560')
+    expect(screen.getByRole('img', { name: 'DentalClinic' })).toHaveAttribute('height', '144')
+    expect(container.querySelector('img[alt=""]')).toHaveAttribute('width', '720')
+    expect(container.querySelector('img[alt=""]')).toHaveAttribute('height', '1023')
+  })
   it('shows the generic API error for invalid credentials', async () => {
     authService.login.mockRejectedValue(new Error('Correo electrónico o contraseña incorrectos.'))
     renderPage()
