@@ -45,6 +45,10 @@ function ModulePage({ title }) {
 }
 
 export default function App() {
+  const { initializing } = useAuth()
+  if (initializing) {
+    return <main className="grid min-h-screen place-items-center text-sm text-slate-500" role="status">Inicializando sesión…</main>
+  }
   return <Routes>
     <Route path="/login" element={<LoginPage />} />
     <Route path="/recuperar-contrasena" element={<PasswordResetRequestPage />} />

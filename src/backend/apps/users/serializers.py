@@ -1,4 +1,5 @@
 from hashlib import sha256
+from datetime import UTC, datetime
 from pathlib import Path
 
 from django.contrib.auth import authenticate
@@ -11,9 +12,14 @@ from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
 from rest_framework.reverse import reverse
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.tokens import RefreshToken
-from PIL import Image, UnidentifiedImageError
+from rest_framework_simplejwt.serializers import (
+    TokenObtainPairSerializer,
+    TokenRefreshSerializer,
+)
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
+
+from apps.common.file_validation import validate_image_content
 
 from .models import RolePermissionPreset, User
 from .permissions import PERMISSION_CODES, get_effective_permissions, order_permissions
@@ -52,21 +58,11 @@ def validate_avatar(uploaded_file):
         raise serializers.ValidationError("Usa una imagen PNG, JPEG o WebP.")
     if uploaded_file.size > MAX_AVATAR_SIZE:
         raise serializers.ValidationError("La foto no puede superar 2 MB.")
-    uploaded_file.seek(0)
-    try:
-        with Image.open(uploaded_file) as image:
-            if image.format not in AVATAR_FORMATS[content_type]:
-                raise serializers.ValidationError(
-                    "El formato real de la imagen no coincide.",
-                )
-            image.verify()
-    except (UnidentifiedImageError, OSError, ValueError) as error:
-        raise serializers.ValidationError(
-            "El contenido de la imagen no es válido.",
-        ) from error
-    finally:
-        uploaded_file.seek(0)
-    return uploaded_file
+    return validate_image_content(
+        uploaded_file,
+        AVATAR_FORMATS[content_type],
+        "El contenido de la imagen no es válido.",
+    )
 
 
 class AvatarUpdateMixin:
@@ -103,6 +99,7 @@ class LoginSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)
         token["token_version"] = user.token_version
+        token["session_expires_at"] = token["exp"]
         return token
 
     def validate(self, attrs):
@@ -116,6 +113,7 @@ class LoginSerializer(TokenObtainPairSerializer):
                 code="authorization",
             )
 
+        self.user = user
         refresh = self.get_token(user)
         return {
             "access": str(refresh.access_token),
@@ -133,17 +131,30 @@ class LoginSerializer(TokenObtainPairSerializer):
         }
 
 
-class LogoutSerializer(serializers.Serializer):
-    refresh = serializers.CharField(write_only=True)
-
-    def validate_refresh(self, value):
-        token = RefreshToken(value)
-        if str(token["user_id"]) != str(self.context["request"].user.pk):
-            raise serializers.ValidationError("El token no pertenece al usuario autenticado.")
-        return token
-
-    def save(self, **kwargs):
-        self.validated_data["refresh"].blacklist()
+class CookieTokenRefreshSerializer(TokenRefreshSerializer):
+    def validate(self, attrs):
+        token = RefreshToken(attrs["refresh"])
+        try:
+            user = User.objects.get(pk=token["user_id"], is_active=True)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("La sesión ya no es válida.") from None
+        if token.get("token_version") != user.token_version:
+            raise serializers.ValidationError("La sesión ya no es válida.")
+        self.user = user
+        absolute_expiry = token["session_expires_at"]
+        data = super().validate(attrs)
+        access = AccessToken(data["access"])
+        access["exp"] = min(access["exp"], absolute_expiry)
+        data["access"] = str(access)
+        if "refresh" in data:
+            rotated = RefreshToken(data["refresh"])
+            rotated["exp"] = absolute_expiry
+            data["refresh"] = str(rotated)
+            OutstandingToken.objects.filter(jti=rotated["jti"]).update(
+                token=data["refresh"],
+                expires_at=datetime.fromtimestamp(absolute_expiry, tz=UTC),
+            )
+        return data
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):

@@ -25,12 +25,12 @@ const jsonResponse = (data, status = 200) => ({
 })
 
 function renderPage({ permissions = ['patients.view', 'documents.view', 'documents.create'] } = {}) {
-  sessionStorage.setItem('dentalclinic_session', JSON.stringify({
+  const initialSession = {
     access: 'access-token', refresh: 'refresh-token',
     user: { email: 'clinico@example.com', first_name: 'Elena', role: 'ODONTOLOGO', permissions },
-  }))
+  }
   const router = createMemoryRouter([{
-    path: '*', element: <AuthProvider><App /></AuthProvider>,
+    path: '*', element: <AuthProvider initialSession={initialSession}><App /></AuthProvider>,
   }], { initialEntries: ['/pacientes/1/documentos'] })
   return render(<RouterProvider router={router} />)
 }

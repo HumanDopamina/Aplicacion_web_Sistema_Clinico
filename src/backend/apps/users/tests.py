@@ -13,7 +13,7 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from PIL import Image
@@ -48,7 +48,7 @@ class LoginApiTests(APITestCase):
         )
         self.url = reverse("users:login")
 
-    def test_valid_credentials_return_tokens_and_safe_user_data(self):
+    def test_valid_credentials_return_access_and_safe_user_data(self):
         response = self.client.post(
             self.url,
             {"email": self.user.email, "password": "ContraseñaSegura123!"},
@@ -57,7 +57,8 @@ class LoginApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("access", response.data)
-        self.assertIn("refresh", response.data)
+        self.assertNotIn("refresh", response.data)
+        self.assertIn("dentalclinic_refresh", response.cookies)
         self.assertEqual(response.data["user"]["role"], User.Role.ADMINISTRADOR)
         self.assertEqual(
             response.data["user"]["permissions"],
@@ -125,12 +126,12 @@ class LoginApiTests(APITestCase):
             format="json",
         )
         access = login_response.data["access"]
-        refresh = login_response.data["refresh"]
+        refresh = login_response.cookies["dentalclinic_refresh"].value
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
 
         response = self.client.post(
             reverse("users:logout"),
-            {"refresh": refresh},
+            {},
             format="json",
         )
 
@@ -150,7 +151,7 @@ class LoginApiTests(APITestCase):
 
         refresh_response = self.client.post(
             reverse("users:token-refresh"),
-            {"refresh": login_response.data["refresh"]},
+            {},
             format="json",
         )
 
@@ -162,6 +163,235 @@ class LoginApiTests(APITestCase):
             self.client.get(reverse("users:current-user")).status_code,
             200,
         )
+
+
+class LoginRateLimitTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            email="limite@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.url = reverse("users:login")
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_sixth_failed_attempt_for_same_account_is_throttled(self):
+        for _ in range(5):
+            response = self.client.post(
+                self.url,
+                {"email": self.user.email, "password": "incorrecta"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, 400)
+
+        blocked = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "incorrecta"},
+            format="json",
+        )
+
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(blocked["Retry-After"], "900")
+
+    def test_successful_login_clears_account_failure_counter(self):
+        for _ in range(4):
+            self.client.post(
+                self.url,
+                {"email": self.user.email, "password": "incorrecta"},
+                format="json",
+            )
+
+        success = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "ContraseñaSegura123!"},
+            format="json",
+        )
+        after_success = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "incorrecta"},
+            format="json",
+        )
+
+        self.assertEqual(success.status_code, 200)
+        self.assertEqual(after_success.status_code, 400)
+
+    def test_ip_limit_counts_failures_across_distinct_accounts(self):
+        for index in range(20):
+            response = self.client.post(
+                self.url,
+                {"email": f"unknown-{index}@example.test", "password": "incorrecta"},
+                format="json",
+                REMOTE_ADDR="192.0.2.25",
+            )
+            self.assertEqual(response.status_code, 400)
+
+        blocked = self.client.post(
+            self.url,
+            {"email": "another@example.test", "password": "incorrecta"},
+            format="json",
+            REMOTE_ADDR="192.0.2.25",
+        )
+
+        self.assertEqual(blocked.status_code, 429)
+
+    def test_untrusted_forwarded_for_header_does_not_define_client_ip(self):
+        for index in range(21):
+            response = self.client.post(
+                self.url,
+                {"email": f"spoof-{index}@example.test", "password": "incorrecta"},
+                format="json",
+                REMOTE_ADDR=f"192.0.2.{index + 1}",
+                HTTP_X_FORWARDED_FOR="198.51.100.99",
+            )
+            self.assertEqual(response.status_code, 400)
+
+
+class SecureSessionApiTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            email="sesion-segura@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.client = APIClient(enforce_csrf_checks=True)
+
+    def csrf_headers(self):
+        response = self.client.get(reverse("users:csrf"))
+        self.assertEqual(response.status_code, 204)
+        token = self.client.cookies["csrftoken"].value
+        return {"HTTP_X_CSRFTOKEN": token}
+
+    def login(self):
+        return self.client.post(
+            reverse("users:login"),
+            {"email": self.user.email, "password": "ContraseñaSegura123!"},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+    def test_login_requires_csrf_and_keeps_refresh_out_of_json(self):
+        rejected = self.client.post(
+            reverse("users:login"),
+            {"email": self.user.email, "password": "ContraseñaSegura123!"},
+            format="json",
+        )
+        accepted = self.login()
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertIn("access", accepted.data)
+        self.assertNotIn("refresh", accepted.data)
+        cookie = accepted.cookies["dentalclinic_refresh"]
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")
+        self.assertEqual(cookie["path"], "/api/auth/")
+        self.assertEqual(cookie["max-age"], 28800)
+
+    def test_refresh_uses_cookie_rotates_it_and_rejects_reuse(self):
+        login = self.login()
+        previous_refresh = login.cookies["dentalclinic_refresh"].value
+        absolute_expiry = RefreshToken(previous_refresh)["session_expires_at"]
+
+        refreshed = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertIn("access", refreshed.data)
+        self.assertNotIn("refresh", refreshed.data)
+        self.assertNotEqual(
+            refreshed.cookies["dentalclinic_refresh"].value,
+            previous_refresh,
+        )
+        rotated = RefreshToken(refreshed.cookies["dentalclinic_refresh"].value)
+        self.assertEqual(rotated["exp"], absolute_expiry)
+        with self.assertRaises(TokenError):
+            RefreshToken(previous_refresh).check_blacklist()
+
+    def test_refresh_and_logout_reject_missing_csrf(self):
+        login = self.login()
+
+        rejected_refresh = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        rejected_logout = self.client.post(
+            reverse("users:logout"),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(rejected_refresh.status_code, 403)
+        self.assertEqual(rejected_logout.status_code, 403)
+
+    def test_refresh_rejects_revoked_token_version(self):
+        self.login()
+        self.user.token_version += 1
+        self.user.save(update_fields=["token_version"])
+
+        response = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_refresh_rejects_an_inactive_user(self):
+        self.login()
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_logout_uses_cookie_without_body_and_revokes_access(self):
+        login = self.login()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        response = self.client.post(
+            reverse("users:logout"),
+            {},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.cookies["dentalclinic_refresh"]["max-age"], 0)
+        self.assertEqual(self.client.get(reverse("users:current-user")).status_code, 401)
+
+    def test_password_change_clears_the_refresh_cookie(self):
+        login = self.login()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        response = self.client.post(
+            reverse("users:password-change"),
+            {
+                "current_password": "ContraseñaSegura123!",
+                "new_password": "ContraseñaNueva456!",
+                "confirm_password": "ContraseñaNueva456!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.cookies["dentalclinic_refresh"]["max-age"], 0)
 
 
 class CurrentUserProfileApiTests(APITestCase):
@@ -737,7 +967,7 @@ class UserRegistrationApiTests(APITestCase):
             format="json",
         )
         old_access = login.data["access"]
-        old_refresh = login.data["refresh"]
+        old_refresh = login.cookies["dentalclinic_refresh"].value
         original_token_version = member.token_version
         self.client.force_authenticate(self.admin)
 
@@ -765,13 +995,10 @@ class UserRegistrationApiTests(APITestCase):
         self.client.credentials()
         refreshed = self.client.post(
             reverse("users:token-refresh"),
-            {"refresh": old_refresh},
+            {},
             format="json",
         )
-        self.assertEqual(refreshed.status_code, 200)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refreshed.data['access']}")
-        refreshed_session = self.client.get(reverse("users:current-user"))
-        self.assertEqual(refreshed_session.status_code, 401)
+        self.assertEqual(refreshed.status_code, 401)
 
     def test_hu06_password_change_rejects_mismatch_without_mutating_user(self):
         member = User.objects.create_user(

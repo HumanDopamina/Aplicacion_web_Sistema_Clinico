@@ -1,14 +1,26 @@
-import { apiRequest } from './api'
+import { apiRequest, csrfRequest, refreshAccessToken, setAccessToken } from './api'
 
-export const login = (credentials) => apiRequest('/api/auth/login/', {
-  method: 'POST', body: JSON.stringify(credentials),
-})
+export async function login(credentials) {
+  const session = await csrfRequest('/api/auth/login/', {
+    method: 'POST', body: JSON.stringify(credentials),
+  })
+  setAccessToken(session.access)
+  return session
+}
 
-export const logout = ({ access, refresh }) => apiRequest('/api/auth/logout/', {
+export const logout = ({ access }) => csrfRequest('/api/auth/logout/', {
   method: 'POST',
-  body: JSON.stringify({ refresh }),
+  body: JSON.stringify({}),
   headers: { Authorization: `Bearer ${access}` },
 })
+
+export async function restoreSession() {
+  const access = await refreshAccessToken()
+  const user = await apiRequest('/api/auth/me/', {
+    headers: { Authorization: `Bearer ${access}` },
+  })
+  return { access, user }
+}
 
 export const requestPasswordReset = ({ email }) => apiRequest('/api/auth/password-reset/', {
   method: 'POST',

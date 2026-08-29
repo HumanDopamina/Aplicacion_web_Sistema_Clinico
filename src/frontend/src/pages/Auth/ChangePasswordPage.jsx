@@ -28,7 +28,7 @@ export default function ChangePasswordPage() {
         confirm_password: form.confirmation,
       })
       sessionStorage.setItem('dentalclinic_auth_notice', response.detail)
-      await signOut()
+      await signOut({ revoke: false })
       navigate('/login', { replace: true })
     } catch (requestError) {
       setError(requestError.message || 'No fue posible actualizar la contraseña.')

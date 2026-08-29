@@ -7,7 +7,7 @@ import { useAuth } from '../../context/authContextValue'
 import { login } from '../../services/authService'
 
 export default function LoginPage() {
-  const [form, setForm] = useState({ email: '', password: '', remember: false })
+  const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const { signIn } = useAuth()
@@ -18,11 +18,11 @@ export default function LoginPage() {
     sessionStorage.removeItem('dentalclinic_auth_notice')
     return location.state?.notice || storedNotice || ''
   })
-  const change = ({ target }) => setForm((current) => ({ ...current, [target.name]: target.type === 'checkbox' ? target.checked : target.value }))
+  const change = ({ target }) => setForm((current) => ({ ...current, [target.name]: target.value }))
   const submit = async (event) => {
     event.preventDefault(); setError('')
     if (!form.email.trim() || !form.password) return setError('Ingresa tu correo electrónico y contraseña.')
-    try { setLoading(true); const session = await login({ email: form.email.trim(), password: form.password }); signIn(session, form.remember); navigate('/bienvenida', { replace: true }) }
+    try { setLoading(true); const session = await login({ email: form.email.trim(), password: form.password }); signIn(session); navigate('/bienvenida', { replace: true }) }
     catch (err) { setError(err.message || 'Correo electrónico o contraseña incorrectos.') }
     finally { setLoading(false) }
   }
@@ -39,12 +39,11 @@ export default function LoginPage() {
             <p className="mt-1 mb-6 text-[#888] text-sm">Ingresa tus credenciales para acceder</p>
             {notice ? <div role="status" className="bg-[#eefaf4] text-[#17603e] px-3 py-2.5 mb-3.5 rounded-md text-sm">{notice}</div> : null}
             {error && <div role="alert" className="bg-[#fff0f0] text-[#a51d1d] px-3 py-2.5 mb-3.5 rounded-md text-sm">{error}</div>}
-            <label htmlFor="email" className="text-sm font-bold mb-1.5">Correo Electronico</label>
+            <label htmlFor="email" className="text-sm font-bold mb-1.5">Correo electrónico</label>
             <input id="email" name="email" type="email" value={form.email} onChange={change} placeholder="Enter your email" autoComplete="email" className="px-3 py-3 mb-4 border border-[#d5d5d5] rounded-lg text-sm" />
-            <label htmlFor="password" className="text-sm font-bold mb-1.5">Constraseña</label>
+            <label htmlFor="password" className="text-sm font-bold mb-1.5">Contraseña</label>
             <input id="password" name="password" type="password" value={form.password} onChange={change} placeholder="••••••••" autoComplete="current-password" className="px-3 py-3 mb-4 border border-[#d5d5d5] rounded-lg text-sm" />
-            <div className="flex justify-between items-center mb-10 text-xs">
-              <label className="font-normal flex items-center gap-1.5"><input name="remember" type="checkbox" checked={form.remember} onChange={change} /> Recuérdame</label>
+            <div className="flex justify-end items-center mb-10 text-xs">
               <Link to="/recuperar-contrasena" className="text-[#252525] no-underline font-semibold">¿Has olvidado tu contraseña?</Link>
             </div>
             <CustomButton type="submit" disabled={loading}>{loading ? 'Iniciando sesión…' : 'Iniciar sesión'}</CustomButton>

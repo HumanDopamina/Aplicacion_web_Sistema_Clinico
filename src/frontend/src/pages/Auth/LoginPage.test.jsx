@@ -11,20 +11,25 @@ const renderPage = () => render(<MemoryRouter><AuthProvider><LoginPage /></AuthP
 
 describe('LoginPage', () => {
   afterEach(cleanup)
-  beforeEach(() => { localStorage.clear(); sessionStorage.clear() })
+  beforeEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+    authService.restoreSession.mockRejectedValue(new Error('Sin sesión'))
+  })
   it('validates empty credentials', async () => {
     renderPage(); fireEvent.click(screen.getByRole('button', { name: 'Iniciar sesión' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('Ingresa tu correo electrónico y contraseña.')
   })
-  it('persists a remembered session', async () => {
-    authService.login.mockResolvedValue({ access: 'access', refresh: 'refresh', user: { email: 'admin@test.com', role: 'ADMINISTRADOR' } })
+  it('keeps the authenticated session out of Web Storage', async () => {
+    authService.login.mockResolvedValue({ access: 'access', user: { email: 'admin@test.com', role: 'ADMINISTRADOR' } })
     renderPage()
-    fireEvent.change(screen.getByLabelText('Correo Electronico'), { target: { value: 'admin@test.com' } })
-    fireEvent.change(screen.getByLabelText('Constraseña'), { target: { value: 'secreto' } })
-    fireEvent.click(screen.getByLabelText('Recuérdame'))
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'admin@test.com' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'secreto' } })
     fireEvent.click(screen.getByRole('button', { name: 'Iniciar sesión' }))
     await waitFor(() => expect(authService.login).toHaveBeenCalled())
-    expect(localStorage.getItem('dentalclinic_session')).toContain('admin@test.com')
+    expect(screen.queryByLabelText('Recuérdame')).not.toBeInTheDocument()
+    expect(localStorage.getItem('dentalclinic_session')).toBeNull()
+    expect(sessionStorage.getItem('dentalclinic_session')).toBeNull()
   })
   it('links to the password recovery flow', () => {
     renderPage()
@@ -37,8 +42,8 @@ describe('LoginPage', () => {
   it('shows the generic API error for invalid credentials', async () => {
     authService.login.mockRejectedValue(new Error('Correo electrónico o contraseña incorrectos.'))
     renderPage()
-    fireEvent.change(screen.getByLabelText('Correo Electronico'), { target: { value: 'unknown@test.com' } })
-    fireEvent.change(screen.getByLabelText('Constraseña'), { target: { value: 'incorrecta' } })
+    fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'unknown@test.com' } })
+    fireEvent.change(screen.getByLabelText('Contraseña'), { target: { value: 'incorrecta' } })
     fireEvent.click(screen.getByRole('button', { name: 'Iniciar sesión' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Correo electrónico o contraseña incorrectos.')

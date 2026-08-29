@@ -4,7 +4,7 @@ import { changePassword, confirmPasswordReset, logout, requestPasswordReset } fr
 describe('authService.logout', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('revokes the refresh token using the authenticated API endpoint', async () => {
+  it('revokes the cookie refresh without sending it in the request body', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 204,
@@ -12,13 +12,15 @@ describe('authService.logout', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    await logout({ access: 'access-token', refresh: 'refresh-token' })
+    await logout({ access: 'access-token' })
 
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       'http://127.0.0.1:8000/api/auth/logout/',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ refresh: 'refresh-token' }),
+        body: JSON.stringify({}),
+        credentials: 'include',
         headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
       }),
     )

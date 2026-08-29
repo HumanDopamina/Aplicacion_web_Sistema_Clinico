@@ -62,14 +62,14 @@ function renderAt(path, role = 'ODONTOLOGO') {
   const permissions = role === 'RECEPCIONISTA'
     ? ['patients.view', 'consultations.view']
     : ['patients.view', 'consultations.view', 'consultations.create', 'consultations.edit']
-  sessionStorage.setItem('dentalclinic_session', JSON.stringify({
+  const initialSession = {
     access: 'access-token',
     refresh: 'refresh-token',
     user: { email: 'clinico@example.com', first_name: 'Elena', role, permissions },
-  }))
+  }
   const router = createMemoryRouter([{
     path: '*',
-    element: <AuthProvider><App /></AuthProvider>,
+    element: <AuthProvider initialSession={initialSession}><App /></AuthProvider>,
   }], { initialEntries: [path] })
   return { ...render(<RouterProvider router={router} />), router }
 }

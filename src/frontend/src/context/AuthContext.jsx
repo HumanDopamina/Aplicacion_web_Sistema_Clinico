@@ -1,42 +1,70 @@
-import { useCallback, useState } from 'react'
-import { logout as revokeSession } from '../services/authService'
+import { useCallback, useEffect, useState } from 'react'
+import { logout as revokeSession, restoreSession } from '../services/authService'
+import { clearAccessToken, setAccessToken, setSessionExpiredHandler } from '../services/api'
 import { AuthContext } from './authContextValue'
 
-const KEY = 'dentalclinic_session'
-const readSession = () => {
-  try { return JSON.parse(localStorage.getItem(KEY) || sessionStorage.getItem(KEY) || 'null') } catch { return null }
-}
+export function AuthProvider({ children, initialSession }) {
+  const hasInitialSession = initialSession !== undefined
+  const [session, setSession] = useState(initialSession ?? null)
+  const [initializing, setInitializing] = useState(!hasInitialSession)
 
-export function AuthProvider({ children }) {
-  const [session, setSession] = useState(readSession)
-  const signIn = (data, remember) => {
-    const storage = remember ? localStorage : sessionStorage
-    const other = remember ? sessionStorage : localStorage
-    other.removeItem(KEY)
-    storage.setItem(KEY, JSON.stringify(data))
-    setSession(data)
-  }
-  const signOut = async () => {
-    const sessionToRevoke = session
-    localStorage.removeItem(KEY)
-    sessionStorage.removeItem(KEY)
-    setSession(null)
-    if (sessionToRevoke?.access && sessionToRevoke?.refresh) {
-      try {
-        await revokeSession(sessionToRevoke)
-      } catch {
-        // Local logout must still complete if the API is temporarily unavailable.
-      }
+  useEffect(() => {
+    if (hasInitialSession) {
+      setAccessToken(initialSession?.access)
+      return undefined
     }
-  }
-  const updateUser = useCallback((user) => {
-    setSession((current) => {
-      if (!current) return current
-      const next = { ...current, user }
-      const storage = localStorage.getItem(KEY) ? localStorage : sessionStorage
-      storage.setItem(KEY, JSON.stringify(next))
-      return next
-    })
+    let active = true
+    restoreSession()
+      .then((restored) => {
+        if (active) setSession(restored)
+      })
+      .catch(() => {
+        clearAccessToken()
+        if (active) setSession(null)
+      })
+      .finally(() => {
+        if (active) setInitializing(false)
+      })
+    return () => { active = false }
+  }, [hasInitialSession, initialSession])
+
+  useEffect(() => {
+    setSessionExpiredHandler(() => setSession(null))
+    return () => setSessionExpiredHandler(null)
   }, [])
-  return <AuthContext.Provider value={{ user: session?.user, accessToken: session?.access, signIn, signOut, updateUser }}>{children}</AuthContext.Provider>
+
+  const signIn = useCallback((data) => {
+    setAccessToken(data.access)
+    setSession(data)
+    setInitializing(false)
+  }, [])
+
+  const signOut = useCallback(async ({ revoke = true } = {}) => {
+    const access = session?.access
+    try {
+      if (revoke && access) await revokeSession({ access })
+    } catch {
+      // La sesión local se cierra aunque la API no esté disponible.
+    } finally {
+      clearAccessToken()
+      setSession(null)
+    }
+  }, [session?.access])
+
+  const updateUser = useCallback((user) => {
+    setSession((current) => current ? { ...current, user } : current)
+  }, [])
+
+  return (
+    <AuthContext.Provider value={{
+      user: session?.user,
+      accessToken: session?.access,
+      initializing,
+      signIn,
+      signOut,
+      updateUser,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  )
 }

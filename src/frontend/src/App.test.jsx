@@ -146,11 +146,10 @@ function BackControl() {
 }
 
 function renderAuthenticated(role, withBackControl = false, path = '/bienvenida') {
-  sessionStorage.setItem('dentalclinic_session', JSON.stringify(session(role)))
   const router = createMemoryRouter([{
     path: '*',
     element:
-      <AuthProvider>
+      <AuthProvider initialSession={session(role)}>
         {withBackControl ? <BackControl /> : null}
         <App />
       </AuthProvider>,

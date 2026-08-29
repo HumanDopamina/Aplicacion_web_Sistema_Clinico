@@ -1,7 +1,23 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
-const SESSION_KEY = 'dentalclinic_session'
 
+let accessToken = null
 let refreshPromise = null
+let sessionExpiredHandler = null
+let sessionGeneration = 0
+
+export function setAccessToken(token) {
+  accessToken = token || null
+  sessionGeneration += 1
+}
+
+export function clearAccessToken() {
+  accessToken = null
+  sessionGeneration += 1
+}
+
+export function setSessionExpiredHandler(handler) {
+  sessionExpiredHandler = handler
+}
 
 function firstError(value) {
   if (typeof value === 'string') return value
@@ -26,24 +42,49 @@ function errorMessage(data) {
   return firstError(data) || 'No fue posible procesar la solicitud.'
 }
 
+function csrfToken() {
+  const cookie = document.cookie
+    .split('; ')
+    .find((item) => item.startsWith('csrftoken='))
+  return cookie ? decodeURIComponent(cookie.split('=').slice(1).join('=')) : ''
+}
+
+export async function ensureCsrfCookie() {
+  await fetch(`${API_URL}/api/auth/csrf/`, { credentials: 'include' })
+  return csrfToken()
+}
+
+export async function csrfRequest(path, options = {}) {
+  const csrf = await ensureCsrfCookie()
+  return apiRequest(path, {
+    ...options,
+    credentials: 'include',
+    headers: {
+      ...options.headers,
+      ...(csrf ? { 'X-CSRFToken': csrf } : {}),
+    },
+  })
+}
+
 async function authenticatedResponse(path, options = {}) {
   const { _retried, ...requestOptions } = options
-  const currentAccess = options.headers?.Authorization && storedSession()?.session?.access
+  const isProtected = Boolean(options.headers?.Authorization)
   const contentHeaders = options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }
   const response = await fetch(`${API_URL}${path}`, {
     ...requestOptions,
+    credentials: options.credentials || 'include',
     headers: {
       ...contentHeaders,
       ...options.headers,
-      ...(currentAccess ? { Authorization: `Bearer ${currentAccess}` } : {}),
+      ...(isProtected && accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     },
   })
-  if (response.status === 401 && options.headers?.Authorization && !_retried) {
-    const access = await renewAccessToken()
+  if (response.status === 401 && isProtected && !_retried) {
+    const renewedAccess = await refreshAccessToken()
     return authenticatedResponse(path, {
       ...options,
       _retried: true,
-      headers: { ...options.headers, Authorization: `Bearer ${access}` },
+      headers: { ...options.headers, Authorization: `Bearer ${renewedAccess}` },
     })
   }
   return response
@@ -73,36 +114,38 @@ export async function apiBlobRequest(path, options = {}) {
   return response.blob()
 }
 
-function storedSession() {
-  const local = localStorage.getItem(SESSION_KEY)
-  if (local) return { storage: localStorage, session: JSON.parse(local) }
-  const current = sessionStorage.getItem(SESSION_KEY)
-  return current ? { storage: sessionStorage, session: JSON.parse(current) } : null
-}
-
-async function renewAccessToken() {
-  if (refreshPromise) return refreshPromise
-  refreshPromise = (async () => {
-    const stored = storedSession()
-    if (!stored?.session?.refresh) throw new Error('Tu sesión expiró. Inicia sesión nuevamente.')
+export async function refreshAccessToken() {
+  const generation = sessionGeneration
+  if (refreshPromise?.generation === generation) return refreshPromise.promise
+  const promise = (async () => {
+    const csrf = await ensureCsrfCookie()
     const response = await fetch(`${API_URL}/api/auth/token/refresh/`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh: stored.session.refresh }),
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrf ? { 'X-CSRFToken': csrf } : {}),
+      },
+      body: JSON.stringify({}),
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok || !data.access) {
-      localStorage.removeItem(SESSION_KEY)
-      sessionStorage.removeItem(SESSION_KEY)
+      if (generation === sessionGeneration) {
+        clearAccessToken()
+        sessionExpiredHandler?.()
+      }
       throw new Error('Tu sesión expiró. Inicia sesión nuevamente.')
     }
-    stored.session.access = data.access
-    stored.storage.setItem(SESSION_KEY, JSON.stringify(stored.session))
+    if (generation !== sessionGeneration) {
+      throw new Error('La sesión cambió durante la renovación.')
+    }
+    setAccessToken(data.access)
     return data.access
   })()
+  refreshPromise = { generation, promise }
   try {
-    return await refreshPromise
+    return await promise
   } finally {
-    refreshPromise = null
+    if (refreshPromise?.promise === promise) refreshPromise = null
   }
 }

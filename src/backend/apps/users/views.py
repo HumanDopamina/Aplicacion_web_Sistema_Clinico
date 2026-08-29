@@ -1,4 +1,5 @@
 import mimetypes
+import time
 
 from rest_framework import status
 from django.conf import settings
@@ -8,19 +9,24 @@ from django.core.mail import send_mail
 from django.db.models import F
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
+from django.utils.decorators import method_decorator
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
+from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from rest_framework import generics
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from rest_framework import serializers
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .serializers import (
     ChangePasswordSerializer,
     CurrentUserProfileSerializer,
+    CookieTokenRefreshSerializer,
     LoginSerializer,
-    LogoutSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     RolePermissionPresetSerializer,
@@ -28,7 +34,9 @@ from .serializers import (
     UserAdminUpdateSerializer,
 )
 from .models import RolePermissionPreset, User
+from .login_limiter import LoginAttemptLimiter, WINDOW_SECONDS
 from .permissions import PERMISSION_CATALOG
+from .session import clear_refresh_cookie, set_refresh_cookie
 
 
 PASSWORD_RESET_MESSAGE = (
@@ -36,14 +44,73 @@ PASSWORD_RESET_MESSAGE = (
 )
 
 
+@method_decorator(csrf_protect, name="dispatch")
 class LoginView(APIView):
     permission_classes = []
     authentication_classes = []
 
     def post(self, request):
+        limiter = LoginAttemptLimiter(request, request.data.get("email", ""))
+        if limiter.is_blocked():
+            return Response(
+                {"detail": "Demasiados intentos. Intenta nuevamente más tarde."},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(WINDOW_SECONDS)},
+            )
         serializer = LoginSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except serializers.ValidationError:
+            limiter.record_failure()
+            raise
+        limiter.clear_account()
+        payload = dict(serializer.validated_data)
+        refresh = payload.pop("refresh")
+        request._request.audit_actor = serializer.user
+        response = Response(payload, status=status.HTTP_200_OK)
+        set_refresh_cookie(response, refresh)
+        return response
+
+
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class CsrfCookieView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def get(self, request):
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(csrf_protect, name="dispatch")
+class CookieTokenRefreshView(APIView):
+    permission_classes = []
+    authentication_classes = []
+
+    def post(self, request):
+        refresh = request.COOKIES.get(settings.REFRESH_COOKIE_NAME)
+        if not refresh:
+            return Response(
+                {"detail": "La sesión ya no es válida."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        serializer = CookieTokenRefreshSerializer(data={"refresh": refresh})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except (serializers.ValidationError, TokenError):
+            response = Response(
+                {"detail": "La sesión ya no es válida."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+            clear_refresh_cookie(response)
+            return response
+        payload = dict(serializer.validated_data)
+        rotated_refresh = payload.pop("refresh", None)
+        request._request.audit_actor = serializer.user
+        response = Response(payload, status=status.HTTP_200_OK)
+        if rotated_refresh:
+            absolute_expiry = RefreshToken(rotated_refresh)["session_expires_at"]
+            set_refresh_cookie(response, rotated_refresh, absolute_expiry - time.time())
+        return response
 
 
 class CurrentUserView(APIView):
@@ -85,17 +152,25 @@ class UserAvatarView(APIView):
         return response
 
 
+@method_decorator(csrf_protect, name="dispatch")
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = LogoutSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+        refresh = request.COOKIES.get(settings.REFRESH_COOKIE_NAME)
+        if refresh:
+            try:
+                token = RefreshToken(refresh)
+                if str(token["user_id"]) == str(request.user.pk):
+                    token.blacklist()
+            except TokenError:
+                pass
         type(request.user).objects.filter(pk=request.user.pk).update(
             token_version=F("token_version") + 1,
         )
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        clear_refresh_cookie(response)
+        return response
 
 
 class PasswordResetRequestView(APIView):
@@ -158,10 +233,12 @@ class ChangePasswordView(APIView):
         serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(
+        response = Response(
             {"detail": "Tu contraseña fue actualizada correctamente."},
             status=status.HTTP_200_OK,
         )
+        clear_refresh_cookie(response)
+        return response
 
 
 class IsAdministrator(BasePermission):
