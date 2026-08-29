@@ -10,6 +10,10 @@ import OdontogramChart from './OdontogramChart'
 import { PatientHeader, PatientTabs } from './PatientRecordShell'
 import { comparisonSummary } from './odontogramSchema'
 import { patientIdentity, patientInitials } from './patientDisplay'
+import PaginationControls from '../../components/PaginationControls'
+import { normalizePage } from '../../services/pagination'
+
+const PAGE_SIZE = 25
 
 const dateFormatter = new Intl.DateTimeFormat('es-NI', {
   day: '2-digit',
@@ -38,6 +42,8 @@ export default function PatientOdontogramHistoryPage() {
   const { accessToken } = useAuth()
   const [patient, setPatient] = useState(null)
   const [versions, setVersions] = useState([])
+  const [versionCount, setVersionCount] = useState(0)
+  const [page, setPage] = useState(1)
   const [versionAId, setVersionAId] = useState('')
   const [versionBId, setVersionBId] = useState('')
   const [versionA, setVersionA] = useState(null)
@@ -53,14 +59,16 @@ export default function PatientOdontogramHistoryPage() {
     let active = true
     Promise.all([
       getPatient(accessToken, patientId),
-      listPatientOdontogramVersions(accessToken, patientId),
-    ]).then(([loadedPatient, loadedVersions]) => {
+      listPatientOdontogramVersions(accessToken, patientId, page > 1 ? page : undefined),
+    ]).then(([loadedPatient, versionPayload]) => {
       if (!active) return
+      const loadedVersions = normalizePage(versionPayload)
       setPatient(loadedPatient)
-      setVersions(loadedVersions)
-      if (loadedVersions.length) {
-        setVersionAId(String(loadedVersions.at(-1).id))
-        setVersionBId(String(loadedVersions[0].id))
+      setVersions(loadedVersions.results)
+      setVersionCount(loadedVersions.count)
+      if (loadedVersions.results.length) {
+        setVersionAId(String(loadedVersions.results.at(-1).id))
+        setVersionBId(String(loadedVersions.results[0].id))
       }
     }).catch((requestError) => {
       if (active) setError(requestError.message)
@@ -68,7 +76,7 @@ export default function PatientOdontogramHistoryPage() {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [accessToken, patientId])
+  }, [accessToken, page, patientId])
 
   useEffect(() => {
     if (!versionAId || !versionBId) return undefined
@@ -108,6 +116,7 @@ export default function PatientOdontogramHistoryPage() {
       <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
         <h2 className="font-serif text-2xl font-semibold text-slate-900">Línea temporal</h2>
         <ol className="relative mt-5 space-y-1 border-l border-cyan-200 pl-6">{versions.map((version) => <li key={version.id} className="relative rounded-xl px-3 py-4 hover:bg-slate-50"><span aria-hidden="true" className="absolute -left-[1.95rem] top-5 h-3 w-3 rounded-full border-2 border-white bg-cyan-700 ring-1 ring-cyan-200" /><div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-sm font-semibold text-slate-800">Versión {version.version_number} · {version.consultation_type_display}</p><p className="mt-1 text-xs text-slate-500">Consulta {formatDate(version.consultation_date)} · Guardado {formatDate(version.created_at, true)} · {version.professional_name}</p>{version.note ? <p className="mt-2 text-sm text-slate-600">{version.note}</p> : null}</div><div className="flex shrink-0 flex-wrap gap-2"><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600">{version.changed_teeth.length} piezas modificadas</span><button type="button" onClick={() => setVersionBId(String(version.id))} className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">Comparar</button><Link to={`/pacientes/${patientId}/consultas/${version.consultation}/odontograma`} className="rounded-full bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-800">Ver consulta</Link></div></div></li>)}</ol>
+        <PaginationControls count={versionCount} label="odontogramas" page={page} pageSize={PAGE_SIZE} onPageChange={setPage} />
       </section>
 
       <section className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/60 p-5 sm:p-6">

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { listAppointments } from '../../services/appointmentService'
+import { listAllAppointments } from '../../services/appointmentService'
 import * as patientService from '../../services/patientService'
 import DashboardPage from './DashboardPage'
 
@@ -34,7 +34,7 @@ describe('DashboardPage', () => {
       total_patients: 0,
       recently_attended: [],
     })
-    listAppointments.mockResolvedValue([])
+    listAllAppointments.mockResolvedValue([])
     patientService.listRecentConsultations.mockResolvedValue([])
   })
   afterEach(() => {
@@ -238,7 +238,7 @@ describe('DashboardPage', () => {
   it('shows the appointments scheduled for the current local date', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     vi.setSystemTime(new Date('2026-08-09T12:00:00'))
-    listAppointments.mockImplementation((access, filters) => Promise.resolve(
+    listAllAppointments.mockImplementation((access, filters) => Promise.resolve(
       access === 'access-token' && filters.date === '2026-08-09'
         ? [{
             id: 9,

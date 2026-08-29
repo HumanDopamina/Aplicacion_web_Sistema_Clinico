@@ -31,6 +31,15 @@ describe('appointmentService', () => {
     )
   })
 
+  it('requests a bounded appointment page', () => {
+    listAppointments('token', { date: '2026-08-12', page: 2, page_size: 100 })
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      '/api/appointments/?date=2026-08-12&page=2&page_size=100',
+      { headers: { Authorization: 'Bearer token' } },
+    )
+  })
+
   it('creates and updates appointments with authentication', () => {
     const appointment = { patient: 2, dentist: 3, date: '2026-08-12' }
     createAppointment('token', appointment)

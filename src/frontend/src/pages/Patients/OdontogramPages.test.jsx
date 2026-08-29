@@ -245,4 +245,37 @@ describe('versioned odontograms', () => {
     expect(screen.getByLabelText('Versión B')).toHaveValue('42')
     expect(await screen.findByText('Pieza 14: hallazgo agregado')).toBeInTheDocument()
   })
+
+  it('pages the odontogram timeline without downloading the complete history', async () => {
+    const pageOne = Array.from({ length: 25 }, (_, index) => ({
+      ...initialVersion,
+      id: 100 + index,
+      version_number: 26 - index,
+      changed_teeth: [],
+      note: `Control ${26 - index}`,
+    }))
+    const oldest = { ...initialVersion, id: 75, version_number: 1, note: 'Primera evaluación' }
+
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/odontogram-versions/')) {
+        return Promise.resolve(jsonResponse({ count: 26, next: 'page=2', previous: null, results: pageOne }))
+      }
+      if (url.endsWith('/api/patients/1/odontogram-versions/?page=2')) {
+        return Promise.resolve(jsonResponse({ count: 26, next: null, previous: 'page=1', results: [oldest] }))
+      }
+      if (/\/api\/patients\/1\/odontogram-versions\/\d+\/$/.test(url)) {
+        const id = Number(url.match(/(\d+)\/$/)[1])
+        return Promise.resolve(jsonResponse(id === oldest.id ? oldest : pageOne.find((item) => item.id === id)))
+      }
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patient))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    renderAt('/pacientes/1/odontogramas')
+
+    expect(await screen.findByText('Página 1 de 2')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Página siguiente de odontogramas' }))
+    expect(await screen.findByText('Primera evaluación')).toBeInTheDocument()
+    expect(screen.getByText('Página 2 de 2')).toBeInTheDocument()
+  })
 })

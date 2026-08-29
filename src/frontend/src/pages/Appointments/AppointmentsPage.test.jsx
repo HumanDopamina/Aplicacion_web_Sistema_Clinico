@@ -2,14 +2,14 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthContext } from '../../context/authContextValue'
 import * as appointmentService from '../../services/appointmentService'
-import { listPatients } from '../../services/patientService'
+import { listAllPatients } from '../../services/patientService'
 import { listClinicServices } from '../../services/clinicService'
 import AppointmentsPage from './AppointmentsPage'
 
 vi.mock('../../services/appointmentService')
 vi.mock('../../services/patientService', async (importOriginal) => ({
   ...await importOriginal(),
-  listPatients: vi.fn(),
+  listAllPatients: vi.fn(),
 }))
 vi.mock('../../services/clinicService', () => ({ listClinicServices: vi.fn() }))
 
@@ -76,7 +76,7 @@ function renderPage(user = receptionist) {
 describe('AppointmentsPage', () => {
   beforeEach(() => {
     listClinicServices.mockResolvedValue([])
-    appointmentService.listAppointments.mockResolvedValue([appointment()])
+    appointmentService.listAllAppointments.mockResolvedValue([appointment()])
     appointmentService.getAvailableDentists.mockResolvedValue([dentist])
     appointmentService.createAppointment.mockResolvedValue(appointment())
     appointmentService.updateAppointment.mockImplementation((access, id, changes) => {
@@ -88,7 +88,7 @@ describe('AppointmentsPage', () => {
         status_display: labels[changes.status] || 'Programada',
       }))
     })
-    listPatients.mockResolvedValue([patient])
+    listAllPatients.mockResolvedValue([patient])
   })
 
   afterEach(() => {
@@ -126,7 +126,7 @@ describe('AppointmentsPage', () => {
   })
 
   it('switches to a seven-day agenda and opens one day from the week', async () => {
-    appointmentService.listAppointments.mockResolvedValue([
+    appointmentService.listAllAppointments.mockResolvedValue([
       appointment(),
       appointment({
         id: 10,
@@ -156,7 +156,7 @@ describe('AppointmentsPage', () => {
   })
 
   it('shows a monthly calendar and drills into a day with appointments', async () => {
-    appointmentService.listAppointments.mockResolvedValue([
+    appointmentService.listAllAppointments.mockResolvedValue([
       appointment(),
       appointment({
         id: 10,
@@ -183,7 +183,7 @@ describe('AppointmentsPage', () => {
   })
 
   it('creates an appointment from the accessible side panel', async () => {
-    appointmentService.listAppointments.mockResolvedValue([])
+    appointmentService.listAllAppointments.mockResolvedValue([])
     listClinicServices.mockResolvedValue([{
       id: 4, name: 'Control de ortodoncia', duration_minutes: 45, is_active: true,
     }])
@@ -210,7 +210,7 @@ describe('AppointmentsPage', () => {
   })
 
   it('preserves the form and explains a scheduling conflict', async () => {
-    appointmentService.listAppointments.mockResolvedValue([])
+    appointmentService.listAllAppointments.mockResolvedValue([])
     appointmentService.createAppointment.mockRejectedValue(
       new Error('El odontólogo ya tiene una cita en ese horario.'),
     )

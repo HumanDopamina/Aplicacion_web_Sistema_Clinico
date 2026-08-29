@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 
 from apps.users.models import User
 from apps.users.permissions import HasCapability, user_has_permission
+from apps.common.pagination import StandardPageNumberPagination
 
 from .models import Appointment
 from .serializers import (
@@ -39,6 +40,7 @@ def enforce_dentist_assignment_scope(request):
 
 class AppointmentListCreateView(generics.ListCreateAPIView):
     serializer_class = AppointmentSerializer
+    pagination_class = StandardPageNumberPagination
     permission_classes = (IsAuthenticated, HasCapability)
     required_permissions = {
         "GET": "appointments.view",

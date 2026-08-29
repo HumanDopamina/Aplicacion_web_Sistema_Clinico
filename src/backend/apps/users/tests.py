@@ -850,11 +850,11 @@ class UserRegistrationApiTests(APITestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 3)
-        for user in response.data:
+        self.assertEqual(response.data["count"], 3)
+        for user in response.data["results"]:
             self.assertIn("role", user)
             self.assertIn("is_active", user)
-        users_by_email = {user["email"]: user for user in response.data}
+        users_by_email = {user["email"]: user for user in response.data["results"]}
         self.assertEqual(
             users_by_email["activo@dentalclinic.com"]["role"],
             User.Role.ODONTOLOGO,
@@ -866,6 +866,26 @@ class UserRegistrationApiTests(APITestCase):
         )
         self.assertFalse(users_by_email["inactivo@dentalclinic.com"]["is_active"])
         self.assertIn("admin-users@dentalclinic.com", users_by_email)
+
+    def test_staff_list_is_paginated(self):
+        User.objects.create_user(
+            email="uno@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        User.objects.create_user(
+            email="dos@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url, {"page_size": 2})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 3)
+        self.assertEqual(len(response.data["results"]), 2)
+        self.assertIsNotNone(response.data["next"])
 
     def test_administrator_creates_a_login_ready_user_without_exposing_password(self):
         self.client.force_authenticate(self.admin)

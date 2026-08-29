@@ -10,9 +10,15 @@ const profileFormData = (values) => {
   return data
 }
 
-export const listUsers = (access) => apiRequest('/api/auth/users/', {
+export const listUsers = (access, page, pageSize) => {
+  const query = new URLSearchParams()
+  if (page) query.set('page', page)
+  if (pageSize) query.set('page_size', pageSize)
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/auth/users/${suffix}`, {
   headers: auth(access),
-})
+  })
+}
 
 export const createUser = (access, user) => apiRequest('/api/auth/users/', {
   method: 'POST',

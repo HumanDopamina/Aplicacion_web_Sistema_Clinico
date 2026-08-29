@@ -108,6 +108,17 @@ class PatientDocumentApiTests(APITestCase):
         self.assertEqual(self.client.get(self.list_url()).status_code, 200)
         self.assertEqual(self.upload(pdf_file())[0]["mime_type"], "application/pdf")
 
+    def test_document_list_is_paginated(self):
+        self.client.force_authenticate(self.receptionist)
+        self.upload(png_file("primero.png"), pdf_file("segundo.pdf"))
+
+        response = self.client.get(self.list_url(), {"page_size": 1})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertIsNotNone(response.data["next"])
+
     def test_batch_upload_normalizes_metadata_and_never_exposes_private_path(self):
         self.client.force_authenticate(self.receptionist)
         created = self.upload(
@@ -141,7 +152,7 @@ class PatientDocumentApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("PDF", str(response.data))
-        self.assertEqual(self.client.get(self.list_url()).data, [])
+        self.assertEqual(self.client.get(self.list_url()).data["results"], [])
         self.assertEqual([path for path in self.private_root.rglob("*") if path.is_file()], [])
 
     def test_corrupted_png_returns_validation_error_without_leaving_files(self):
@@ -159,7 +170,7 @@ class PatientDocumentApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("imagen no es válido", str(response.data))
-        self.assertEqual(self.client.get(self.list_url()).data, [])
+        self.assertEqual(self.client.get(self.list_url()).data["results"], [])
         self.assertEqual([path for path in self.private_root.rglob("*") if path.is_file()], [])
 
     def test_image_pixel_bomb_returns_validation_error(self):
@@ -177,7 +188,7 @@ class PatientDocumentApiTests(APITestCase):
             )
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.client.get(self.list_url()).data, [])
+        self.assertEqual(self.client.get(self.list_url()).data["results"], [])
 
     def test_rejects_unsupported_content_extension_size_count_and_batch_size(self):
         self.client.force_authenticate(self.receptionist)
@@ -208,7 +219,10 @@ class PatientDocumentApiTests(APITestCase):
         categories = self.client.get("/api/patients/document-categories/")
 
         self.assertEqual(filtered.status_code, 200)
-        self.assertEqual([item["original_name"] for item in filtered.data], ["panoramica.png"])
+        self.assertEqual(
+            [item["original_name"] for item in filtered.data["results"]],
+            ["panoramica.png"],
+        )
         self.assertEqual(categories.status_code, 200)
         self.assertEqual(categories.data, ["Consentimiento", "Radiografía"])
 
@@ -266,7 +280,7 @@ class PatientDocumentApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertFalse(stored_path.exists())
-        self.assertEqual(self.client.get(self.list_url()).data, [])
+        self.assertEqual(self.client.get(self.list_url()).data["results"], [])
 
     def test_missing_capability_is_denied_even_when_patient_exists(self):
         preset = RolePermissionPreset.objects.get(role=User.Role.RECEPCIONISTA)

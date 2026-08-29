@@ -305,8 +305,11 @@ class OdontogramApiTests(APITestCase):
         )
 
         self.assertEqual(history.status_code, 200)
-        self.assertEqual([item["version_number"] for item in history.data], [2, 1])
-        self.assertNotIn("teeth", history.data[0])
+        self.assertEqual(
+            [item["version_number"] for item in history.data["results"]],
+            [2, 1],
+        )
+        self.assertNotIn("teeth", history.data["results"][0])
         self.assertEqual(detail.status_code, 200)
         self.assertIn("teeth", detail.data)
         self.assertEqual(wrong_patient.status_code, 404)

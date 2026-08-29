@@ -32,6 +32,14 @@ describe('patientService', () => {
     })
   })
 
+  it('requests a bounded patient page', () => {
+    listPatients('token', 'María García', 2, 25)
+    expect(apiRequest).toHaveBeenCalledWith(
+      '/api/patients/?search=Mar%C3%ADa%20Garc%C3%ADa&page=2&page_size=25',
+      { headers: { Authorization: 'Bearer token' } },
+    )
+  })
+
   it('creates a patient without exposing technical fields', () => {
     const patient = { first_name: 'María', national_id: '001-A' }
     createPatient('token', patient)
@@ -50,6 +58,13 @@ describe('patientService', () => {
   it('loads the consultations scoped to a patient', () => {
     listPatientConsultations('token', 7)
     expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/consultations/', {
+      headers: { Authorization: 'Bearer token' },
+    })
+  })
+
+  it('requests a bounded consultation page', () => {
+    listPatientConsultations('token', 7, 3, 25)
+    expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/consultations/?page=3&page_size=25', {
       headers: { Authorization: 'Bearer token' },
     })
   })
@@ -114,6 +129,17 @@ describe('patientService', () => {
     expect(apiRequest).toHaveBeenNthCalledWith(2, '/api/patients/document-categories/', {
       headers: { Authorization: 'Bearer token' },
     })
+  })
+
+  it('requests a bounded filtered document page', () => {
+    listPatientDocuments('token', 7, {
+      search: 'rayos X', category: 'Radiografía dental', page: 2, pageSize: 25,
+    })
+
+    expect(apiRequest).toHaveBeenCalledWith(
+      '/api/patients/7/documents/?search=rayos%20X&category=Radiograf%C3%ADa%20dental&page=2&page_size=25',
+      { headers: { Authorization: 'Bearer token' } },
+    )
   })
 
   it('uploads repeated files as multipart without setting a content type', () => {

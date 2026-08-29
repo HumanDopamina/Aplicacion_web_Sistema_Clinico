@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 
 from apps.users.permissions import HasCapability, user_has_permission
 from apps.clinics.availability import clinic_today
+from apps.common.pagination import StandardPageNumberPagination
 
 from .models import Consultation, OdontogramVersion, Patient, PatientDocument
 from .odontograms import OdontogramConflict
@@ -36,6 +37,7 @@ class PatientListCreateView(generics.ListCreateAPIView):
         "POST": "patients.create",
     }
     filter_backends = (filters.SearchFilter,)
+    pagination_class = StandardPageNumberPagination
     search_fields = (
         "code",
         "first_name",
@@ -115,6 +117,7 @@ class PatientDashboardSummaryView(APIView):
 
 class PatientConsultationListView(generics.ListCreateAPIView):
     serializer_class = ConsultationSerializer
+    pagination_class = StandardPageNumberPagination
     permission_classes = (IsAuthenticated, HasCapability)
     required_permissions = {
         "GET": "consultations.view",
@@ -214,6 +217,7 @@ class ConsultationOdontogramVersionCreateView(generics.CreateAPIView):
 
 class PatientOdontogramVersionListView(generics.ListAPIView):
     serializer_class = OdontogramVersionSummarySerializer
+    pagination_class = StandardPageNumberPagination
     permission_classes = (IsAuthenticated, HasCapability)
     required_permissions = {
         "GET": "consultations.view",
@@ -270,7 +274,14 @@ class PatientDocumentListCreateView(APIView):
                 | Q(category__icontains=search)
                 | Q(notes__icontains=search)
             )
-        return Response(PatientDocumentSerializer(queryset, many=True).data)
+        paginator = StandardPageNumberPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        data = PatientDocumentSerializer(
+            page,
+            many=True,
+            context={"request": request},
+        ).data
+        return paginator.get_paginated_response(data)
 
     def post(self, request, patient_pk):
         patient = self.get_patient()

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../context/authContextValue'
 import { listPatientConsultations } from '../../services/patientService'
+import { normalizePage } from '../../services/pagination'
+import PaginationControls from '../../components/PaginationControls'
 
 const dateFormatter = new Intl.DateTimeFormat('es-NI', {
   day: '2-digit',
@@ -15,6 +17,7 @@ const statusStyles = {
   EN_PROGRESO: 'bg-amber-50 text-amber-700',
   CANCELADA: 'bg-red-50 text-red-700',
 }
+const PAGE_SIZE = 25
 
 function formatDate(value) {
   return dateFormatter.format(new Date(`${value}T00:00:00Z`))
@@ -36,18 +39,25 @@ function ConsultationCard({ consultation, patientId }) {
 export default function PatientConsultationsPanel({ accessToken, patientId }) {
   const { user } = useAuth()
   const [consultations, setConsultations] = useState([])
+  const [consultationCount, setConsultationCount] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const canCreate = user.role === 'ADMINISTRADOR' || user.permissions?.includes('consultations.create')
 
   useEffect(() => {
     let active = true
-    listPatientConsultations(accessToken, patientId)
-      .then((data) => { if (active) setConsultations(data) })
+    listPatientConsultations(accessToken, patientId, page > 1 ? page : undefined)
+      .then((data) => {
+        if (!active) return
+        const loaded = normalizePage(data)
+        setConsultations(loaded.results)
+        setConsultationCount(loaded.count)
+      })
       .catch((requestError) => { if (active) setError(requestError.message) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [accessToken, patientId])
+  }, [accessToken, page, patientId])
 
   return <section aria-labelledby="patient-consultations-title" className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
     <header className="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
@@ -65,5 +75,6 @@ export default function PatientConsultationsPanel({ accessToken, patientId }) {
       <div className="grid gap-3 bg-slate-50/60 p-4 sm:hidden">{consultations.map((consultation) => <ConsultationCard key={consultation.id} consultation={consultation} patientId={patientId} />)}</div>
       <div className="hidden overflow-x-auto sm:block"><table className="w-full border-collapse text-left"><thead><tr className="bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500"><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">Tipo</th><th className="px-6 py-3">Profesional</th><th className="px-6 py-3">Resumen</th><th className="px-6 py-3">Estado</th><th className="px-6 py-3"><span className="sr-only">Acciones</span></th></tr></thead><tbody className="divide-y divide-slate-100">{consultations.map((consultation) => <tr key={consultation.id} className="transition-colors hover:bg-slate-50"><td className="whitespace-nowrap px-6 py-4"><time dateTime={consultation.date} className="font-mono text-xs font-medium text-slate-700">{formatDate(consultation.date)}</time></td><td className="px-6 py-4"><span className="inline-flex rounded-full bg-cyan-50 px-2.5 py-1 text-[11px] font-semibold text-cyan-700">{consultation.consultation_type_display}</span></td><td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-slate-700">{consultation.professional_name}</td><td className="max-w-sm px-6 py-4 text-sm leading-6 text-slate-500">{consultation.summary}</td><td className="whitespace-nowrap px-6 py-4"><StatusBadge consultation={consultation} /></td><td className="whitespace-nowrap px-6 py-4 text-right"><Link to={`/pacientes/${patientId}/consultas/${consultation.id}`} className="text-xs font-semibold text-blue-700 hover:text-blue-900">Ver detalle</Link></td></tr>)}</tbody></table></div>
     </> : null}
+    {!loading && !error ? <PaginationControls count={consultationCount} label="Consultas" onPageChange={setPage} page={page} pageSize={PAGE_SIZE} /> : null}
   </section>
 }

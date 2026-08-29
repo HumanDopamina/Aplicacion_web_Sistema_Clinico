@@ -321,8 +321,35 @@ class PatientApiTests(APITestCase):
         response = self.client.get(f"{self.list_url}?search=Juan")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 1)
-        self.assertEqual(response.data[0]["full_name"], "Juan Pérez")
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["full_name"], "Juan Pérez")
+
+    def test_patient_list_is_paginated_and_caps_the_requested_page_size(self):
+        self.client.force_authenticate(self.admin)
+        self.client.post(self.list_url, self.payload(), format="json")
+        self.client.post(
+            self.list_url,
+            self.payload(
+                national_id="001-010190-0002B",
+                email="segundo@example.com",
+            ),
+            format="json",
+        )
+
+        response = self.client.get(self.list_url, {"page_size": 1})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertIsNotNone(response.data["next"])
+
+    def test_authenticated_unsupported_patient_method_returns_405(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(self.list_url, self.payload(), format="json")
+
+        response = self.client.delete(f"{self.list_url}{created.data['id']}/")
+
+        self.assertEqual(response.status_code, 405)
 
     def test_hu10_role_with_edit_permission_updates_patient_and_preserves_audit_fields(self):
         self.client.force_authenticate(self.admin)
@@ -378,7 +405,8 @@ class PatientApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [])
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
 
     def test_patient_consultations_requires_consultation_view_permission(self):
         self.client.force_authenticate(self.admin)
@@ -429,13 +457,14 @@ class PatientApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 2)
-        self.assertEqual(response.data[0]["date"], "2026-08-08")
-        self.assertEqual(response.data[0]["consultation_type"], "SEGUIMIENTO")
-        self.assertEqual(response.data[0]["consultation_type_display"], "Seguimiento")
-        self.assertEqual(response.data[0]["professional_name"], "Elena Rivera")
-        self.assertEqual(response.data[0]["status_display"], "Completada")
-        self.assertEqual(response.data[1]["date"], "2026-08-01")
+        self.assertEqual(response.data["count"], 2)
+        results = response.data["results"]
+        self.assertEqual(results[0]["date"], "2026-08-08")
+        self.assertEqual(results[0]["consultation_type"], "SEGUIMIENTO")
+        self.assertEqual(results[0]["consultation_type_display"], "Seguimiento")
+        self.assertEqual(results[0]["professional_name"], "Elena Rivera")
+        self.assertEqual(results[0]["status_display"], "Completada")
+        self.assertEqual(results[1]["date"], "2026-08-01")
 
 
 class RecentConsultationApiTests(APITestCase):

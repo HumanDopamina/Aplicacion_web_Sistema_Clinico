@@ -135,6 +135,20 @@ describe('userService', () => {
     )
   })
 
+  it('requests a bounded staff page', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ count: 0, results: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listUsers('access-token', 2, 25)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:8000/api/auth/users/?page=2&page_size=25',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    )
+  })
+
   it('lists role permission presets with bearer authentication', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ presets: [] }))
     vi.stubGlobal('fetch', fetchMock)

@@ -1,11 +1,20 @@
 import { apiBlobRequest, apiRequest } from './api'
+import { collectPaginatedResults } from './pagination'
 
 const authorization = (access) => ({ Authorization: `Bearer ${access}` })
 
-export const listPatients = (access, search = '') => {
-  const query = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ''
-  return apiRequest(`/api/patients/${query}`, { headers: authorization(access) })
+export const listPatients = (access, search = '', page, pageSize) => {
+  const query = new URLSearchParams()
+  if (search.trim()) query.set('search', search.trim())
+  if (page) query.set('page', page)
+  if (pageSize) query.set('page_size', pageSize)
+  const suffix = query.size ? `?${query.toString().replaceAll('+', '%20')}` : ''
+  return apiRequest(`/api/patients/${suffix}`, { headers: authorization(access) })
 }
+
+export const listAllPatients = (access, search = '') => collectPaginatedResults(
+  (page, pageSize) => listPatients(access, search, page, pageSize),
+)
 
 export const listPatientDashboardSummary = (access) => apiRequest(
   '/api/patients/dashboard-summary/',
@@ -22,9 +31,15 @@ export const getPatient = (access, id) => apiRequest(`/api/patients/${id}/`, {
   headers: authorization(access),
 })
 
-export const listPatientConsultations = (access, id) => apiRequest(`/api/patients/${id}/consultations/`, {
+export const listPatientConsultations = (access, id, page, pageSize) => {
+  const query = new URLSearchParams()
+  if (page) query.set('page', page)
+  if (pageSize) query.set('page_size', pageSize)
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(`/api/patients/${id}/consultations/${suffix}`, {
   headers: authorization(access),
-})
+  })
+}
 
 export const listRecentConsultations = (access) => apiRequest('/api/patients/consultations/recent/', {
   headers: authorization(access),
@@ -67,10 +82,16 @@ export const createOdontogramVersion = (access, patientId, consultationId, versi
   },
 )
 
-export const listPatientOdontogramVersions = (access, patientId) => apiRequest(
-  `/api/patients/${patientId}/odontogram-versions/`,
-  { headers: authorization(access) },
-)
+export const listPatientOdontogramVersions = (access, patientId, page, pageSize) => {
+  const query = new URLSearchParams()
+  if (page) query.set('page', page)
+  if (pageSize) query.set('page_size', pageSize)
+  const suffix = query.size ? `?${query.toString()}` : ''
+  return apiRequest(
+    `/api/patients/${patientId}/odontogram-versions/${suffix}`,
+    { headers: authorization(access) },
+  )
+}
 
 export const getPatientOdontogramVersion = (access, patientId, versionId) => apiRequest(
   `/api/patients/${patientId}/odontogram-versions/${versionId}/`,
@@ -87,6 +108,8 @@ export const listPatientDocuments = (access, patientId, filters = {}) => {
   const query = new URLSearchParams()
   if (filters.search?.trim()) query.set('search', filters.search.trim())
   if (filters.category?.trim()) query.set('category', filters.category.trim())
+  if (filters.page) query.set('page', filters.page)
+  if (filters.pageSize) query.set('page_size', filters.pageSize)
   const suffix = query.size ? `?${query.toString().replaceAll('+', '%20')}` : ''
   return apiRequest(`/api/patients/${patientId}/documents/${suffix}`, {
     headers: authorization(access),

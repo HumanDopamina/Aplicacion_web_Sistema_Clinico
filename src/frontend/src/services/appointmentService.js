@@ -1,4 +1,5 @@
 import { apiRequest } from './api'
+import { collectPaginatedResults } from './pagination'
 
 const authorization = (access) => ({ Authorization: `Bearer ${access}` })
 
@@ -14,6 +15,10 @@ const queryString = (params) => {
 export const listAppointments = (access, filters = {}) => apiRequest(
   `/api/appointments/${queryString(filters)}`,
   { headers: authorization(access) },
+)
+
+export const listAllAppointments = (access, filters = {}) => collectPaginatedResults(
+  (page, pageSize) => listAppointments(access, { ...filters, page, page_size: pageSize }),
 )
 
 export const getAppointment = (access, id) => apiRequest(`/api/appointments/${id}/`, {

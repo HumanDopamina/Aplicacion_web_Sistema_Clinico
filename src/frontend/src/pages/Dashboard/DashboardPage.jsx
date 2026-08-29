@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { listAppointments } from '../../services/appointmentService'
+import { listAllAppointments } from '../../services/appointmentService'
 import { listPatientDashboardSummary, listRecentConsultations } from '../../services/patientService'
 import { formatClock, statusTone, todayValue } from '../Appointments/appointmentDisplay'
 import { useClinic } from '../../context/clinicContextValue'
@@ -143,7 +143,7 @@ export default function DashboardPage({ user, accessToken }) {
     let active = true
     setAppointmentsLoading(true)
     setAppointmentsError('')
-    listAppointments(accessToken, { date: currentDate })
+    listAllAppointments(accessToken, { date: currentDate })
       .then((data) => { if (active) setAppointments(data) })
       .catch((requestError) => { if (active) setAppointmentsError(requestError.message) })
       .finally(() => { if (active) setAppointmentsLoading(false) })

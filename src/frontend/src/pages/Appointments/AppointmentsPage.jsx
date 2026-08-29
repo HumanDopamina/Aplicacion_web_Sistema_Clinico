@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../context/authContextValue'
 import {
   createAppointment,
-  listAppointments,
+  listAllAppointments,
   updateAppointment,
 } from '../../services/appointmentService'
-import { listPatients } from '../../services/patientService'
+import { listAllPatients } from '../../services/patientService'
 import { listClinicServices } from '../../services/clinicService'
 import { useClinic } from '../../context/clinicContextValue'
 import AppointmentDetailsPanel from './AppointmentDetailsPanel'
@@ -50,8 +50,8 @@ export default function AppointmentsPage() {
     setLoading(true)
     setError('')
     Promise.all([
-      listAppointments(accessToken, agendaFilters),
-      listPatients(accessToken),
+      listAllAppointments(accessToken, agendaFilters),
+      listAllPatients(accessToken),
       listClinicServices(accessToken),
     ])
       .then(([appointmentData, patientData, serviceData]) => {

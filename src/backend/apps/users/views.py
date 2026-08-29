@@ -22,6 +22,8 @@ from rest_framework import serializers
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.common.pagination import StandardPageNumberPagination
+
 from .serializers import (
     ChangePasswordSerializer,
     CurrentUserProfileSerializer,
@@ -253,6 +255,7 @@ class UserCollectionView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated, IsAdministrator]
     serializer_class = UserAdminSerializer
     queryset = User.objects.order_by("first_name", "email")
+    pagination_class = StandardPageNumberPagination
 
 
 class UserDetailView(generics.UpdateAPIView):

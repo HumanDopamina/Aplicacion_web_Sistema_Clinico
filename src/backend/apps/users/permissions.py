@@ -81,6 +81,8 @@ class HasCapability(BasePermission):
     """Authorize each HTTP method with the capability declared by the view."""
 
     def has_permission(self, request, view):
+        if request.method not in view.allowed_methods:
+            return True
         permission_code = getattr(view, "required_permissions", {}).get(request.method)
         return bool(
             request.user

@@ -184,7 +184,23 @@ class AppointmentApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([item["id"] for item in response.data], [expected.pk])
+        self.assertEqual([item["id"] for item in response.data["results"]], [expected.pk])
+
+    def test_appointment_list_is_paginated(self):
+        self.create_appointment()
+        self.create_appointment(
+            patient=self.other_patient,
+            dentist=self.other_dentist,
+            start_time=time(11, 0),
+        )
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.get(self.list_url, {"page_size": 1})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertIsNotNone(response.data["next"])
 
     def test_dentist_without_view_all_only_lists_own_appointments(self):
         own = self.create_appointment(dentist=self.dentist)
@@ -200,10 +216,10 @@ class AppointmentApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data, [])
+        self.assertEqual(response.data["results"], [])
 
         response = self.client.get(f"{self.list_url}?date=2026-08-12")
-        self.assertEqual([item["id"] for item in response.data], [own.pk])
+        self.assertEqual([item["id"] for item in response.data["results"]], [own.pk])
 
     def test_dentist_with_view_all_lists_the_team_appointments(self):
         first = self.create_appointment(dentist=self.dentist)
@@ -221,7 +237,10 @@ class AppointmentApiTests(APITestCase):
         response = self.client.get(f"{self.list_url}?date=2026-08-12")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([item["id"] for item in response.data], [first.pk, second.pk])
+        self.assertEqual(
+            [item["id"] for item in response.data["results"]],
+            [first.pk, second.pk],
+        )
 
     def test_dentist_without_view_all_cannot_retrieve_another_dentists_appointment(self):
         appointment = self.create_appointment(dentist=self.other_dentist)
@@ -246,7 +265,10 @@ class AppointmentApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual([item["id"] for item in response.data], [first.pk, second.pk])
+        self.assertEqual(
+            [item["id"] for item in response.data["results"]],
+            [first.pk, second.pk],
+        )
 
     def test_availability_returns_only_active_non_overlapping_dentists(self):
         self.create_appointment()
