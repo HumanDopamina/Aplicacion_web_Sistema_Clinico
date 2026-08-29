@@ -24,6 +24,7 @@ urlpatterns = [
     path('api/patients/', include('apps.patients.urls')),
     path('api/appointments/', include('apps.appointments.urls')),
     path('api/clinics/', include('apps.clinics.urls')),
+    path('api/audit/', include('apps.audit.urls')),
 ]
 
 if settings.ENABLE_DJANGO_ADMIN:

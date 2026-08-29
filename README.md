@@ -16,6 +16,8 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Detección robusta de pacientes duplicados por identificación, ignorando guiones, espacios y mayúsculas sin alterar el formato visible.
 - Historial, creación, visualización y edición en línea de consultas clínicas por paciente.
 - Odontogramas FDI por consulta con revisiones inmutables y comparación histórica por paciente.
+- Sesiones de ocho horas con refresh JWT en cookie `HttpOnly`, CSRF y access token sólo en memoria.
+- Protección de login por cuenta e IP y auditoría append-only de operaciones clínicas y administrativas.
 
 ## Tecnologías
 
@@ -26,6 +28,7 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Django REST Framework
 - SimpleJWT
 - SQLite para desarrollo
+- PostgreSQL, Redis y almacenamiento S3-compatible configurables en producción
 
 ### Frontend
 
@@ -142,7 +145,7 @@ El frontend utiliza la siguiente variable opcional:
 VITE_API_URL=http://127.0.0.1:8000
 ```
 
-El backend reconoce:
+En desarrollo, el backend reconoce:
 
 | Variable | Valor predeterminado | Uso |
 |---|---|---|
@@ -152,11 +155,11 @@ El backend reconoce:
 
 En el entorno de desarrollo, los correos no se envían a una bandeja real: su contenido y el enlace de recuperación aparecen en la terminal del backend.
 
-La configuración de un proveedor SMTP real está pendiente. Las credenciales SMTP deben suministrarse mediante variables de entorno y nunca guardarse en Git.
+Producción utiliza `config.settings.production` y exige base PostgreSQL, Redis, hosts/orígenes, SMTP, buckets y prefijos S3-compatible. Consulta [`src/backend/.env.example`](src/backend/.env.example) y el [procedimiento de despliegue](docs/deployment.md). Las credenciales deben suministrarse mediante un gestor de secretos y nunca guardarse en Git.
 
 ## Autenticación y seguridad
 
-La API utiliza access y refresh tokens JWT. Cada usuario tiene una versión de token que permite invalidar inmediatamente los access tokens emitidos previamente.
+La API utiliza un access JWT de cinco minutos sólo en memoria y un refresh rotatorio de ocho horas en cookie `HttpOnly`. Login, refresh y logout requieren CSRF. Cada usuario tiene una versión de token que permite invalidar inmediatamente los tokens emitidos previamente.
 
 Los siguientes eventos invalidan las sesiones anteriores:
 
@@ -171,18 +174,19 @@ Los enlaces de recuperación:
 - No revelan si el correo solicitado está registrado.
 - Están limitados a cinco solicitudes por hora y cliente.
 
-> El almacenamiento actual de JWT en Web Storage es adecuado para el entorno de desarrollo, pero debe revisarse antes de un despliegue con información clínica real.
+No se guardan JWT en `localStorage` ni `sessionStorage`. La decisión y sus consecuencias están en [ADR-0001](docs/adr/0001-refresh-token-cookie.md).
 
 ## Endpoints de autenticación
 
 | Método | Endpoint | Autenticación | Descripción |
 |---|---|---:|---|
-| `POST` | `/api/auth/login/` | No | Inicia sesión y devuelve los tokens. |
-| `POST` | `/api/auth/token/refresh/` | Refresh token | Renueva automáticamente un access token vencido. |
+| `GET` | `/api/auth/csrf/` | No | Establece la cookie CSRF y devuelve `204`. |
+| `POST` | `/api/auth/login/` | CSRF | Devuelve access y usuario; establece el refresh `HttpOnly`. |
+| `POST` | `/api/auth/token/refresh/` | Cookie refresh + CSRF | Rota la cookie y devuelve un access nuevo. |
 | `GET` | `/api/auth/me/` | Sí | Devuelve el usuario autenticado. |
 | `PATCH` | `/api/auth/me/` | Sí | Actualiza nombre, apellidos, teléfono, correo y foto del usuario autenticado. |
 | `GET` | `/api/auth/me/avatar/` | Propietario | Sirve la foto privada del usuario autenticado. |
-| `POST` | `/api/auth/logout/` | Sí | Revoca la sesión y el refresh token. |
+| `POST` | `/api/auth/logout/` | Access + cookie + CSRF | Revoca la sesión, limpia la cookie y devuelve `204`. |
 | `POST` | `/api/auth/password-reset/` | No | Solicita el enlace de recuperación. |
 | `POST` | `/api/auth/password-reset/confirm/` | No | Confirma una nueva contraseña con uid y token. |
 | `POST` | `/api/auth/password-change/` | Sí | Cambia la contraseña del usuario autenticado. |
@@ -232,6 +236,12 @@ npm test
 npm run lint
 npm run build
 ```
+
+CI ejecuta estas comprobaciones, valida que no falten migraciones, aplica las migraciones desde cero y corre `check --deploy` con configuración productiva sintética.
+
+## Auditoría
+
+`GET /api/audit/events/` permite a Administración consultar eventos paginados y filtrados. El modelo es append-only y no expone endpoints de escritura. El contrato, la redacción de datos sensibles y la retención están documentados en [Auditoría clínica y administrativa](docs/audit-trail.md).
 
 ## Flujos disponibles
 

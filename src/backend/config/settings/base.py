@@ -19,6 +19,7 @@ INSTALLED_APPS = [
     "apps.patients",
     "apps.appointments",
     "apps.clinics",
+    "apps.audit",
 ]
 
 MIDDLEWARE = [
@@ -28,6 +29,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.audit.middleware.RequestIdMiddleware",
+    "apps.audit.middleware.AuditTrailMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "config.middleware.ApiSecurityHeadersMiddleware",
