@@ -118,6 +118,64 @@ describe('SettingsPage staff management', () => {
     expect(screen.getByRole('button', { name: 'Añadir miembro' })).toBeInTheDocument()
   })
 
+  it('does not expose notifications while that feature is outside the MVP', () => {
+    renderPage()
+
+    expect(screen.queryByRole('button', { name: /Notificaciones/ })).not.toBeInTheDocument()
+  })
+
+  it('loads the next bounded staff page', async () => {
+    userService.listUsers
+      .mockResolvedValueOnce({
+        count: 26,
+        next: '/api/auth/users/?page=2',
+        previous: null,
+        results: [{
+          id: 2,
+          email: 'ana@dentalclinic.com',
+          first_name: 'Ana',
+          last_name: 'Pérez',
+          role: 'ODONTOLOGO',
+          is_active: true,
+        }],
+      })
+      .mockResolvedValueOnce({
+        count: 26,
+        next: null,
+        previous: '/api/auth/users/',
+        results: [{
+          id: 3,
+          email: 'bruno@dentalclinic.com',
+          first_name: 'Bruno',
+          last_name: 'López',
+          role: 'RECEPCIONISTA',
+          is_active: true,
+        }],
+      })
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Página siguiente de Personal' }))
+
+    expect(await screen.findByText('Bruno López')).toBeInTheDocument()
+    expect(userService.listUsers).toHaveBeenLastCalledWith('access-token', 2)
+  })
+
+  it('closes the staff dialog with Escape and restores focus to its opener', async () => {
+    renderPage()
+    openStaff()
+    const opener = await screen.findByRole('button', { name: 'Añadir miembro' })
+    opener.focus()
+    fireEvent.click(opener)
+
+    expect(screen.getByRole('dialog', { name: 'Añadir miembro' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Nombre')).toHaveFocus()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog', { name: 'Añadir miembro' })).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
+  })
+
   it('opens operational panels only when selected and saves the clinic profile', async () => {
     renderPage()
     expect(await screen.findByRole('heading', { name: 'Perfil de la clínica' })).toBeInTheDocument()

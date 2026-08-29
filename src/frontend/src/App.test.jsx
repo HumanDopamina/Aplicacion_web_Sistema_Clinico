@@ -235,6 +235,26 @@ describe('authenticated routes', () => {
     expect(screen.queryByRole('menuitem', { name: 'Mi perfil' })).not.toBeInTheDocument()
   })
 
+  it.each([
+    ['/usuarios', 'staff'],
+    ['/clinicas', 'perfil'],
+  ])('redirects the legacy administrator route %s to functional configuration', async (path, section) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([])))
+
+    const { router } = renderAuthenticated('ADMINISTRADOR', false, path)
+
+    expect(await screen.findByRole('heading', { name: 'Configuración' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/configuracion')
+    expect(router.state.location.search).toBe(`?seccion=${section}`)
+  })
+
+  it('does not render inactive notification or global-search controls', () => {
+    renderAuthenticated('ODONTOLOGO')
+
+    expect(screen.queryByRole('button', { name: 'Notificaciones' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('searchbox', { name: 'Buscar pacientes o citas' })).not.toBeInTheDocument()
+  })
+
   it.each(['ADMINISTRADOR', 'RECEPCIONISTA', 'ODONTOLOGO'])(
     'allows %s to open the personal profile route',
     async (role) => {

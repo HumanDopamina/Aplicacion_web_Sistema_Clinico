@@ -1,8 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/authContextValue'
 import { createUser, listUsers, updateUser } from '../../services/userService'
 import AuthenticatedAvatar from '../../components/AuthenticatedAvatar'
 import RolePermissionsPanel from './RolePermissionsPanel'
+import PaginationControls from '../../components/PaginationControls'
+import { normalizePage } from '../../services/pagination'
 
 const ClinicProfilePanel = lazy(() => import('./ClinicProfilePanel'))
 const BusinessHoursPanel = lazy(() => import('./BusinessHoursPanel'))
@@ -14,8 +17,19 @@ const settingsSections = [
   ['✚', 'Servicios y tarifas', 'Tratamientos y precios'],
   ['▣', 'Gestión de Staff', 'Doctores y asistentes'],
   ['◈', 'Permisos por rol', 'Accesos por perfil'],
-  ['●', 'Notificaciones', 'Recordatorios SMS/Email'],
 ]
+
+const sectionKeys = {
+  perfil: 'Perfil de la clínica',
+  horarios: 'Horarios de atención',
+  servicios: 'Servicios y tarifas',
+  staff: 'Gestión de Staff',
+  permisos: 'Permisos por rol',
+}
+const keysBySection = Object.fromEntries(
+  Object.entries(sectionKeys).map(([key, section]) => [section, key]),
+)
+const PAGE_SIZE = 25
 
 const roleLabels = {
   ADMINISTRADOR: 'Administrador',
@@ -49,6 +63,44 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
   const [avatarPreview, setAvatarPreview] = useState('')
   const [removeAvatar, setRemoveAvatar] = useState(false)
   const [passwordChangeOpen, setPasswordChangeOpen] = useState(false)
+  const dialogRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+
+  useEffect(() => {
+    const previousFocus = document.activeElement
+    const dialog = dialogRef.current
+    const focusableSelector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]'
+    dialog?.querySelector('input[name="first_name"]')?.focus()
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !dialog) return
+      const focusable = [...dialog.querySelectorAll(focusableSelector)]
+        .filter((element) => element.getAttribute('aria-hidden') !== 'true')
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable.at(-1)
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      if (previousFocus instanceof HTMLElement) previousFocus.focus()
+    }
+  }, [])
 
   useEffect(() => {
     if (!avatar) {
@@ -110,7 +162,7 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4" role="presentation">
-      <section role="dialog" aria-modal="true" aria-labelledby="member-form-title" className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="member-form-title" className="max-h-[92vh] w-full max-w-xl overscroll-contain overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="member-form-title" className="font-serif text-2xl font-semibold text-slate-900">{isEditing ? 'Editar miembro' : 'Añadir miembro'}</h2>
@@ -121,7 +173,7 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
 
         <form onSubmit={submit} className="mt-6 grid gap-4 sm:grid-cols-2">
           <label className="grid gap-1.5 text-sm font-medium text-slate-700">Nombre
-            <input required name="first_name" value={form.first_name} onChange={update} autoFocus className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            <input required name="first_name" value={form.first_name} onChange={update} autoComplete="given-name" className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
           </label>
           <label className="grid gap-1.5 text-sm font-medium text-slate-700">Apellidos
             <input required name="last_name" value={form.last_name} onChange={update} className="rounded-lg border border-slate-300 px-3 py-2.5 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
@@ -201,26 +253,35 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
 
 export default function SettingsPage() {
   const { accessToken } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [users, setUsers] = useState([])
+  const [userCount, setUserCount] = useState(0)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
-  const [activeSection, setActiveSection] = useState('Perfil de la clínica')
+  const activeSection = sectionKeys[searchParams.get('seccion')] || 'Perfil de la clínica'
 
   useEffect(() => {
     let active = true
-    listUsers(accessToken)
-      .then((data) => { if (active) setUsers(data) })
+    listUsers(accessToken, page > 1 ? page : undefined)
+      .then((data) => {
+        if (!active) return
+        const loaded = normalizePage(data)
+        setUsers(loaded.results)
+        setUserCount(loaded.count)
+      })
       .catch((error) => { if (active) setLoadError(error.message) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [accessToken])
+  }, [accessToken, page])
 
   const saveUser = (user) => {
     setUsers((current) => editingUser
       ? current.map((item) => item.id === user.id ? user : item)
-      : [...current, user])
+      : current.length < PAGE_SIZE ? [...current, user] : current)
+    if (!editingUser) setUserCount((current) => current + 1)
     setFormOpen(false)
     setEditingUser(null)
   }
@@ -247,9 +308,8 @@ export default function SettingsPage() {
         <nav aria-label="Secciones de configuración" className="flex gap-2 overflow-x-auto lg:block lg:space-y-3">
           {settingsSections.map(([icon, title, description]) => {
             const active = title === activeSection
-            const available = title !== 'Notificaciones'
             return (
-              <button key={title} type="button" disabled={!available} onClick={() => { if (available) setActiveSection(title) }} aria-current={active ? 'page' : undefined} className={`flex min-w-60 items-center gap-3 rounded-xl border p-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${active ? 'border-2 border-blue-700 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
+              <button key={title} type="button" onClick={() => setSearchParams({ seccion: keysBySection[title] })} aria-current={active ? 'page' : undefined} className={`flex min-w-60 items-center gap-3 rounded-xl border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${active ? 'border-2 border-blue-700 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>
                 <span aria-hidden="true" className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${active ? 'bg-blue-700 text-white' : 'bg-slate-100 text-slate-600'}`}>{icon}</span>
                 <span><strong className="block text-sm">{title}</strong><small className="block text-[11px] opacity-70">{description}</small></span>
               </button>
@@ -289,6 +349,7 @@ export default function SettingsPage() {
               </table>
             </div>
           ) : null}
+          {!loading && !loadError ? <PaginationControls count={userCount} label="Personal" onPageChange={setPage} page={page} pageSize={PAGE_SIZE} /> : null}
         </section> : <Suspense fallback={<div className="grid min-h-80 place-items-center rounded-2xl border border-slate-200 bg-white text-sm text-slate-500">Cargando configuración…</div>}>
           {activeSection === 'Perfil de la clínica' ? <ClinicProfilePanel accessToken={accessToken} /> : null}
           {activeSection === 'Horarios de atención' ? <BusinessHoursPanel accessToken={accessToken} /> : null}

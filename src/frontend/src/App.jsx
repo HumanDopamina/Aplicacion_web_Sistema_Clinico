@@ -40,10 +40,6 @@ function ProtectedLayout({ children, allowedRoles, requiredPermission }) {
   )
 }
 
-function ModulePage({ title }) {
-  return <h1>{title}</h1>
-}
-
 export default function App() {
   const { initializing } = useAuth()
   if (initializing) {
@@ -56,7 +52,7 @@ export default function App() {
     <Route path="/bienvenida" element={<ProtectedLayout><WelcomePage /></ProtectedLayout>} />
     <Route path="/cambiar-contrasena" element={<ProtectedLayout><ChangePasswordPage /></ProtectedLayout>} />
     <Route path="/mi-perfil" element={<ProtectedLayout><Suspense fallback={<p className="text-sm text-slate-500">Cargando perfil…</p>}><MyProfilePage /></Suspense></ProtectedLayout>} />
-    <Route path="/usuarios" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Usuarios" /></ProtectedLayout>} />
+    <Route path="/usuarios" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><Navigate to="/configuracion?seccion=staff" replace /></ProtectedLayout>} />
     <Route path="/pacientes" element={<ProtectedLayout requiredPermission="patients.view"><PatientsPage /></ProtectedLayout>} />
     <Route path="/pacientes/nuevo" element={<ProtectedLayout requiredPermission="patients.create"><PatientRecordPage isNew /></ProtectedLayout>} />
     <Route path="/pacientes/:patientId/consultas/nueva" element={<ProtectedLayout requiredPermission="consultations.create"><ConsultationRecordPage isNew /></ProtectedLayout>} />
@@ -66,7 +62,7 @@ export default function App() {
     <Route path="/pacientes/:patientId/odontogramas" element={<ProtectedLayout requiredPermission="consultations.view"><PatientOdontogramHistoryPage /></ProtectedLayout>} />
     <Route path="/pacientes/:patientId/documentos" element={<ProtectedLayout requiredPermission="documents.view"><Suspense fallback={<p className="text-sm text-slate-500">Cargando documentos…</p>}><PatientDocumentsPage /></Suspense></ProtectedLayout>} />
     <Route path="/pacientes/:id" element={<ProtectedLayout requiredPermission="patients.view"><PatientRecordPage /></ProtectedLayout>} />
-    <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><ModulePage title="Clínicas" /></ProtectedLayout>} />
+    <Route path="/clinicas" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><Navigate to="/configuracion?seccion=perfil" replace /></ProtectedLayout>} />
     <Route path="/citas" element={<ProtectedLayout requiredPermission="appointments.view"><Suspense fallback={<p className="text-sm text-slate-500">Cargando agenda…</p>}><AppointmentsPage /></Suspense></ProtectedLayout>} />
     <Route path="/configuracion" element={<ProtectedLayout allowedRoles={['ADMINISTRADOR']}><SettingsPage /></ProtectedLayout>} />
     <Route path="*" element={<Navigate to="/login" replace />} />
