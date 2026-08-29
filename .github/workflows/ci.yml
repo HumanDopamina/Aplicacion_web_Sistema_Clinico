@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: src/backend/requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py migrate --plan
+      - run: python manage.py migrate --noinput
+      - run: python manage.py migrate --check
+      - run: python manage.py test
+      - name: Django production deployment checks
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.production
+          DJANGO_SECRET_KEY: ci-only-secret-key-with-more-than-fifty-characters-1234567890
+          DATABASE_URL: postgresql://clinic:password@database.example.test:5432/clinic?sslmode=require
+          REDIS_URL: redis://cache.example.test:6379/0
+          ALLOWED_HOSTS: clinic.example.test
+          CSRF_TRUSTED_ORIGINS: https://clinic.example.test
+          FRONTEND_URL: https://clinic.example.test
+          EMAIL_HOST: smtp.example.test
+          EMAIL_PORT: '587'
+          EMAIL_HOST_USER: ci@example.test
+          EMAIL_HOST_PASSWORD: ci-only-password
+          DEFAULT_FROM_EMAIL: no-reply@example.test
+          AWS_STORAGE_BUCKET_NAME: clinic-public-ci
+          AWS_PRIVATE_STORAGE_BUCKET_NAME: clinic-private-ci
+          AWS_PUBLIC_MEDIA_PREFIX: public
+          AWS_PRIVATE_MEDIA_PREFIX: private
+          AWS_S3_REGION_NAME: us-east-1
+          LOGIN_TRUSTED_PROXY_IPS: 10.0.0.10
+        run: python manage.py check --deploy
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run build

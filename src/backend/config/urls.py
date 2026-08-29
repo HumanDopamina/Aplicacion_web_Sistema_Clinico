@@ -20,12 +20,14 @@ from django.contrib import admin
 from django.urls import include, path
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
     path('api/auth/', include('apps.users.urls')),
     path('api/patients/', include('apps.patients.urls')),
     path('api/appointments/', include('apps.appointments.urls')),
     path('api/clinics/', include('apps.clinics.urls')),
 ]
+
+if settings.ENABLE_DJANGO_ADMIN:
+    urlpatterns.insert(0, path('admin/', admin.site.urls))
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
