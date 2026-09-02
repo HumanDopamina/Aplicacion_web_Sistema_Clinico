@@ -36,14 +36,14 @@ function ConsultationCard({ consultation, patientId }) {
   </article>
 }
 
-export default function PatientConsultationsPanel({ accessToken, patientId }) {
+export default function PatientConsultationsPanel({ accessToken, patientId, patientActive = true }) {
   const { user } = useAuth()
   const [consultations, setConsultations] = useState([])
   const [consultationCount, setConsultationCount] = useState(0)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const canCreate = user.role === 'ADMINISTRADOR' || user.permissions?.includes('consultations.create')
+  const canCreate = patientActive && (user.role === 'ADMINISTRADOR' || user.permissions?.includes('consultations.create'))
 
   useEffect(() => {
     let active = true
@@ -66,6 +66,8 @@ export default function PatientConsultationsPanel({ accessToken, patientId }) {
         <p className="mt-1 text-sm text-slate-500">Consulta el seguimiento y la evolución clínica.</p></div>
       {canCreate ? <Link to={`/pacientes/${patientId}/consultas/nueva`} className="inline-flex shrink-0 items-center justify-center rounded-xl bg-cyan-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-cyan-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200"><span aria-hidden="true">+&nbsp;</span>Nueva consulta</Link> : null}
     </header>
+
+    {!patientActive ? <p className="m-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">El paciente está inactivo. Su historial permanece disponible en modo de solo lectura.</p> : null}
 
     {loading ? <p role="status" className="p-8 text-center text-sm text-slate-500">Cargando consultas…</p> : null}
     {error ? <p role="alert" className="m-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p> : null}

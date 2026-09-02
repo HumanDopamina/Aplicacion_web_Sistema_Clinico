@@ -37,6 +37,29 @@ export const updateAppointment = (access, id, changes) => apiRequest(`/api/appoi
   headers: authorization(access),
 })
 
+export const startAppointmentAttendance = (access, id) => apiRequest(
+  `/api/appointments/${id}/start-attendance/`,
+  {
+    method: 'POST',
+    headers: authorization(access),
+  },
+)
+
+export const checkInAppointment = (access, id) => apiRequest(
+  `/api/appointments/${id}/check-in/`,
+  {
+    method: 'POST',
+    headers: authorization(access),
+  },
+)
+
+export const listAppointmentReschedules = (access, id) => collectPaginatedResults(
+  (page, pageSize) => apiRequest(
+    `/api/appointments/${id}/reschedule-history/${queryString({ page, page_size: pageSize })}`,
+    { headers: authorization(access) },
+  ),
+)
+
 export const getAvailableDentists = (access, values) => apiRequest(
   `/api/appointments/dentists/availability/${queryString({
     date: values.date,

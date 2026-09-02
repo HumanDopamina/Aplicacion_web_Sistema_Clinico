@@ -5,7 +5,7 @@ Aplicación web para la gestión de una clínica odontológica. El proyecto util
 Actualmente están implementados los flujos de autenticación y seguridad de la cuenta:
 
 - Inicio de sesión con correo y contraseña.
-- Autorización visual según el rol del usuario.
+- Autorización visual según capacidades efectivas entregadas por el backend.
 - Cierre de sesión con revocación de tokens.
 - Recuperación de contraseña mediante enlace temporal.
 - Cambio de contraseña para usuarios autenticados.
@@ -15,6 +15,7 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Registro y búsqueda de pacientes con apertura automática de su expediente clínico completo.
 - Detección robusta de pacientes duplicados por identificación, ignorando guiones, espacios y mayúsculas sin alterar el formato visible.
 - Historial, creación, visualización y edición en línea de consultas clínicas por paciente.
+- Procedimientos planificados estructurados por consulta con snapshots históricos de servicio y precio.
 - Odontogramas FDI por consulta con revisiones inmutables y comparación histórica por paciente.
 - Sesiones de ocho horas con refresh JWT en cookie `HttpOnly`, CSRF y access token sólo en memoria.
 - Protección de login por cuenta e IP y auditoría append-only de operaciones clínicas y administrativas.
@@ -27,8 +28,9 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Django 5.2
 - Django REST Framework
 - SimpleJWT
-- SQLite para desarrollo
-- PostgreSQL, Redis y almacenamiento S3-compatible configurables en producción
+- PostgreSQL para desarrollo y producción
+- SQLite en memoria para pruebas automatizadas
+- Redis y almacenamiento S3-compatible configurables en producción
 
 ### Frontend
 
@@ -69,6 +71,7 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 
 - Python 3 instalado.
 - Node.js y npm instalados.
+- PostgreSQL 18 instalado y accesible.
 - PowerShell, CMD o una terminal compatible.
 
 ## Instalación del backend
@@ -80,13 +83,31 @@ cd src/backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+$env:DATABASE_URL = "postgresql://clinica_user:<contraseña-codificada>@localhost:5432/clinica_dental"
+python manage.py check
 python manage.py migrate
 ```
+
+La base y el rol pueden prepararse desde una sesión administrativa de PostgreSQL:
+
+```sql
+CREATE ROLE clinica_user WITH LOGIN PASSWORD '<contraseña-local>';
+CREATE DATABASE clinica_dental OWNER clinica_user;
+```
+
+`DATABASE_URL` es obligatoria en desarrollo y debe apuntar a PostgreSQL. Si la
+contraseña contiene caracteres reservados para una URL, debe codificarse. El
+proyecto no carga archivos `.env` automáticamente, por lo que la variable debe
+exportarse al proceso o suministrarse mediante un gestor de secretos local. La
+plantilla `src/backend/.env.example` documenta el perfil de producción.
 
 En Linux o macOS, activa el entorno con:
 
 ```bash
 source .venv/bin/activate
+export DATABASE_URL='postgresql://clinica_user:<contraseña-codificada>@localhost:5432/clinica_dental'
+python manage.py check
+python manage.py migrate
 ```
 
 ### Crear un superusuario
@@ -139,19 +160,49 @@ http://localhost:5173/
 
 ## Variables de entorno
 
-El frontend utiliza la siguiente variable opcional:
+El frontend utiliza la siguiente variable. Es opcional sólo en desarrollo y
+obligatoria al construir/configurar una publicación productiva:
 
 ```text
-VITE_API_URL=http://127.0.0.1:8000
+VITE_API_URL=http://localhost:8000
 ```
+
+En desarrollo, si se omite, el frontend reutiliza automáticamente el hostname
+con el que fue abierto y usa el puerto `8000`. En producción falla de forma
+explícita si no se configuró `VITE_API_URL`. No mezcles `localhost` con
+`127.0.0.1`: las cookies CSRF y de sesión deben pertenecer al mismo sitio.
 
 En desarrollo, el backend reconoce:
 
 | Variable | Valor predeterminado | Uso |
 |---|---|---|
+| `DATABASE_URL` | Sin valor predeterminado | Conexión PostgreSQL obligatoria. |
 | `FRONTEND_URL` | `http://localhost:5173` | Base de los enlaces de recuperación. |
 | `EMAIL_BACKEND` | Backend de consola de Django | Define cómo se envían los correos. |
 | `DEFAULT_FROM_EMAIL` | `no-reply@dentalclinic.local` | Remitente de recuperación. |
+
+Las pruebas automatizadas conservan SQLite de forma explícita y aislada:
+
+```powershell
+python manage.py test --settings=config.settings.test
+```
+
+Las reglas críticas de agenda se prueban además sobre PostgreSQL real. Usa un rol
+y una base exclusivos de testing; el rol necesita `CREATEDB` únicamente para que
+Django cree y destruya `test_clinic_test`:
+
+```sql
+CREATE ROLE clinic_test WITH LOGIN PASSWORD '<contraseña-sintética-local>' CREATEDB;
+CREATE DATABASE clinic_test OWNER clinic_test;
+```
+
+```powershell
+$env:TEST_DATABASE_URL='postgresql://clinic_test:<contraseña-sintética-local>@127.0.0.1:5432/clinic_test'
+python manage.py test apps.appointments --settings=config.settings.postgres_test --noinput
+```
+
+`config.settings.postgres_test` rechaza SQLite y también rechaza explícitamente
+`clinica_dental`, evitando que las pruebas destructivas apunten a desarrollo.
 
 En el entorno de desarrollo, los correos no se envían a una bandeja real: su contenido y el enlace de recuperación aparecen en la terminal del backend.
 
@@ -210,8 +261,18 @@ No se guardan JWT en `localStorage` ni `sessionStorage`. La decisión y sus cons
 | `GET` | `/api/patients/{id}/consultations/` | `consultations.view` | Lista las consultas del paciente por fecha descendente. |
 | `POST` | `/api/patients/{id}/consultations/` | `consultations.create` | Registra una consulta y asigna el profesional autenticado. |
 | `GET` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.view` | Abre la ficha clínica completa de la consulta. |
-| `PATCH` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.edit` | Actualiza la consulta sin cambiar paciente o profesional. |
+| `PATCH` | `/api/patients/{id}/consultations/{consultationId}/` | `consultations.edit` | Actualiza una consulta en progreso sin cambiar paciente, profesional ni estado. |
+| `POST` | `/api/patients/{id}/consultations/{consultationId}/complete/` | `consultations.edit` | Cierra la consulta y completa atómicamente la cita vinculada. |
+| `POST` | `/api/patients/{id}/consultations/{consultationId}/cancel/` | `consultations.edit` | Cancela de forma explícita una consulta manual en progreso; una vinculada responde 409. |
+| `GET` | `/api/patients/{id}/consultations/{consultationId}/treatment-items/` | `consultations.view` | Lista los procedimientos planificados de la consulta. |
+| `POST` | `/api/patients/{id}/consultations/{consultationId}/treatment-items/` | `consultations.edit` | Registra una propuesta estructurada mientras la consulta está en progreso. |
+| `GET` | `/api/patients/{id}/consultations/{consultationId}/treatment-items/{itemId}/` | `consultations.view` | Consulta un procedimiento planificado dentro de su contexto clínico. |
+| `PATCH` | `/api/patients/{id}/consultations/{consultationId}/treatment-items/{itemId}/` | `consultations.edit` | Edita una propuesta en progreso sin cambiar origen ni estado. |
+| `POST` | `/api/patients/{id}/consultations/{consultationId}/treatment-items/{itemId}/accept/` | `consultations.edit` | Acepta explícita e idempotentemente una propuesta. |
+| `POST` | `/api/patients/{id}/consultations/{consultationId}/treatment-items/{itemId}/perform/` | `consultations.edit` | Realiza un ítem aceptado y, opcionalmente, registra un resultado confirmado en una nueva versión odontográfica. |
+| `POST` | `/api/patients/{id}/consultations/{consultationId}/treatment-items/{itemId}/cancel/` | `consultations.edit` | Cancela una propuesta o aceptación sin eliminar su historia. |
 | `GET` | `/api/patients/{id}/consultations/{consultationId}/odontogram/` | `consultations.view` | Devuelve la última versión del odontograma de la consulta. |
+| `GET` | `/api/patients/{id}/odontogram/planned-overlay/` | `consultations.view` | Proyecta los tratamientos propuestos y aceptados con contexto dental sobre la capa planificada. |
 | `POST` | `/api/patients/{id}/consultations/{consultationId}/odontogram/versions/` | `consultations.edit` | Guarda una revisión inmutable con control de concurrencia. |
 | `GET` | `/api/patients/{id}/odontogram-versions/` | `consultations.view` | Lista el histórico de versiones del paciente. |
 | `GET` | `/api/patients/{id}/odontogram-versions/{versionId}/` | `consultations.view` | Devuelve el snapshot completo de una versión. |
@@ -223,9 +284,9 @@ No se guardan JWT en `localStorage` ni `sessionStorage`. La decisión y sus cons
 ```powershell
 cd src/backend
 .\.venv\Scripts\Activate.ps1
-python manage.py check
-python manage.py makemigrations --check --dry-run
-python manage.py test
+python manage.py check --settings=config.settings.test
+python manage.py makemigrations --check --dry-run --settings=config.settings.test
+python manage.py test --settings=config.settings.test
 ```
 
 ### Frontend
@@ -237,7 +298,7 @@ npm run lint
 npm run build
 ```
 
-CI ejecuta estas comprobaciones, valida que no falten migraciones, aplica las migraciones desde cero y corre `check --deploy` con configuración productiva sintética.
+CI ejecuta estas comprobaciones, valida que no falten migraciones, aplica las migraciones desde cero y corre `check --deploy` con configuración productiva sintética. Un job separado levanta PostgreSQL 18 con credenciales efímeras y ejecuta las pruebas de constraints, migración, respuestas 409 y concurrencia de citas y transiciones clínicas.
 
 ## Auditoría
 
@@ -299,7 +360,7 @@ El **Resumen clínico** presenta los datos permanentes del paciente y sus antece
 
 Para editar el expediente, el administrador debe otorgar `patients.edit` desde **Configuración → Permisos por rol**. Con ese permiso, los campos de las mismas tarjetas son editables directamente y conservan apariencia de texto hasta recibir foco. La nube **Guardar cambios** y la X **Descartar cambios** aparecen únicamente cuando el borrador difiere de la última versión guardada; la aplicación advierte antes de abandonar cambios pendientes.
 
-La pestaña **Consultas** muestra el historial clínico persistido del paciente en orden descendente por fecha. Cada registro identifica el tipo, profesional, resumen y estado. **Nueva consulta** abre una ficha completa con el mismo comportamiento de edición directa: fecha/hora actuales y estado **En progreso**, nube para guardar, X para descartar y advertencia al abandonar cambios pendientes.
+La pestaña **Consultas** muestra el historial clínico persistido del paciente en orden descendente por fecha. Cada registro identifica el tipo, profesional, resumen y estado. **Nueva consulta** abre una ficha completa con el mismo comportamiento de edición directa: fecha/hora actuales y estado **En progreso**, nube para guardar, X para descartar y advertencia al abandonar cambios pendientes. **Completar consulta** solicita confirmación, registra fecha/usuario de cierre y sincroniza la cita vinculada; el registro completado pasa a sólo lectura hasta que TEC-13 defina adendas o correcciones.
 
 El administrador gestiona `consultations.view`, `consultations.view_all`, `consultations.create` y `consultations.edit` desde los presets de rol. Recepción obtiene visualización por defecto; Odontología obtiene visualización, creación y edición. `consultations.view_all` no se asigna por defecto y amplía únicamente el resumen de consultas recientes del dashboard a todo el equipo. Paciente y profesional se determinan en backend, y `DELETE` no está disponible.
 
@@ -335,19 +396,29 @@ La agenda utiliza `appointments.view`, `appointments.create` y `appointments.edi
 
 ## Consideraciones para producción
 
+La guía integral, arquitectura objetivo, SLO, controles de seguridad, requisitos
+legales, estrategia de recuperación y puertas `NO-GO` se mantienen en
+[`docs/production-readiness.md`](docs/production-readiness.md). El plan técnico
+ejecutable por tareas está en
+[`docs/superpowers/plans/2026-08-28-production-readiness-and-scalability.md`](docs/superpowers/plans/2026-08-28-production-readiness-and-scalability.md).
+
 Antes de desplegar el sistema:
 
 - Mover `SECRET_KEY` a una variable de entorno.
 - Desactivar `DEBUG`.
 - Configurar `ALLOWED_HOSTS` y CORS para los dominios reales.
 - Configurar HTTPS y cabeceras de seguridad.
-- Sustituir SQLite por una base de datos adecuada para producción.
+- Verificar respaldo, restauración y operación de PostgreSQL en el entorno de despliegue.
 - Configurar un servicio SMTP o transaccional.
 - Evaluar cookies `HttpOnly` para almacenar las credenciales de sesión.
 - Ejecutar auditorías de dependencias y seguridad.
 
+Esta lista es solamente un resumen. La salida con datos clínicos reales requiere
+cerrar todas las puertas P0 y adjuntar la evidencia definida en la guía de
+preparación productiva.
+
 ## Estado actual
 
-Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-11, HU-13 y HU-18 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. El sistema permite administrar perfiles personales, registrar y administrar expedientes, consultas clínicas, odontogramas versionados, documentos privados del paciente y una agenda diaria, semanal y mensual de citas con validación de disponibilidad.
+Las historias HU-01, HU-02, HU-03, HU-04, HU-05, HU-06, HU-07, HU-08, HU-09, HU-10, HU-11, HU-13, HU-16, HU-17, HU-18, HU-19, HU-20, HU-23, HU-28, HU-32, HU-35, HU-41, HU-43, HU-44, HU-45, HU-46, HU-47, HU-48, HU-49, HU-50, HU-51, HU-52, HU-53, HU-54, HU-55, HU-56, HU-58 y HU-61 están implementadas y cuentan con pruebas automatizadas. La evidencia de aceptación de cada historia cerrada se conserva en `docs/user-stories/`. La navegación y las rutas cliente consumen capacidades efectivas del backend, revalidan cambios en sesiones abiertas y mantienen los módulos administrativos reservados; los odontólogos disponen además de especialidad y registro profesional opcionales reutilizados en su perfil, consultas y exportaciones clínicas. El sistema permite administrar perfiles personales, ordenar el listado de pacientes en el backend, inactivar o reactivar expedientes conservando su historia y bloqueando nuevas operaciones, registrar expedientes con identificación tipada opcional y responsable administrativo para menores, advertir posibles duplicados por teléfono o nombre y nacimiento, y crear pacientes reales desde la agenda sin abandonar una cita nueva. También permite distinguir perfiles incompletos para agenda y atención clínica, administrar alertas longitudinales, consultas, procedimientos planificados con snapshots históricos, su ciclo de aceptación, realización o cancelación, visualizar el plan longitudinal, integrar odontogramas versionados y programar opcionalmente la próxima cita desde una consulta completada. Incluye fotografías clínicas en el repositorio documental privado, permite asociar opcionalmente documentos a una consulta y pieza FDI sin inferir contexto histórico y exporta el expediente completo como PDF A4 de solo lectura con identidad institucional vigente y fallback seguro del logotipo. También mantiene una agenda diaria, semanal y mensual con profesionales y carga diaria claramente visibles, registro transaccional de llegada, historial inmutable de reprogramaciones, validación de disponibilidad, garantía de no solapamiento en PostgreSQL, búsqueda remota de opciones de paciente e inicio/cierre clínico transaccional e idempotente con sincronización de la cita.
 
 La configuración operativa permite personalizar el perfil y branding de la clínica, definir jornadas con pausas y festivos, y administrar servicios y tarifas. Estas reglas controlan la disponibilidad de citas y usan la zona horaria configurada para el dashboard y la agenda. Consulta el contrato completo en [`docs/clinic-configuration.md`](docs/clinic-configuration.md).

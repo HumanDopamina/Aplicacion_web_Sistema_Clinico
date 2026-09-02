@@ -134,6 +134,12 @@ export default function MyProfilePage() {
             )}
             <h2 className="mt-4 font-serif text-2xl font-semibold text-slate-900">{displayName}</h2>
             <span className="mt-2 rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">{roleLabels[profile.role] || profile.role}</span>
+            {profile.role === 'ODONTOLOGO' ? (
+              <dl className="mt-4 w-full rounded-xl border border-cyan-100 bg-white p-3 text-left text-xs">
+                <div><dt className="font-semibold text-slate-500">Especialidad</dt><dd className="mt-0.5 text-slate-800">{profile.specialty || 'Sin especificar'}</dd></div>
+                <div className="mt-3"><dt className="font-semibold text-slate-500">Registro profesional</dt><dd className="mt-0.5 text-slate-800">{profile.professional_registration_number || 'Sin especificar'}</dd></div>
+              </dl>
+            ) : null}
             <label className="mt-6 w-full cursor-pointer rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">
               Seleccionar foto
               <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Seleccionar foto" onChange={chooseAvatar} />

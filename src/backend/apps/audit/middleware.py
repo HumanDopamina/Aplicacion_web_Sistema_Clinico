@@ -1,6 +1,8 @@
 import ipaddress
 import json
+import logging
 import re
+import time
 import uuid
 
 from django.db import transaction
@@ -9,6 +11,15 @@ from .models import AuditEvent
 
 
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+request_logger = logging.getLogger("dentalclinic.request")
+
+
+def safe_request_path(request):
+    resolver_match = getattr(request, "resolver_match", None)
+    route = getattr(resolver_match, "route", None)
+    if route is None:
+        return "/<unmatched>"
+    return f"/{route.lstrip('/')}"
 
 
 class RequestIdMiddleware:
@@ -16,11 +27,41 @@ class RequestIdMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        started_at = time.monotonic()
+        request.observability_started_at = started_at
         supplied = request.headers.get("X-Request-ID", "")
         request.request_id = supplied if REQUEST_ID_PATTERN.fullmatch(supplied) else str(uuid.uuid4())
         response = self.get_response(request)
         response["X-Request-ID"] = request.request_id
+        status = response.status_code
+        level = logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO
+        request_logger.log(
+            level,
+            "request.completed",
+            extra={
+                "request_id": request.request_id,
+                "method": request.method,
+                "path": safe_request_path(request),
+                "status": status,
+                "duration_ms": round((time.monotonic() - started_at) * 1000, 3),
+            },
+        )
         return response
+
+    def process_exception(self, request, exception):
+        started_at = getattr(request, "observability_started_at", time.monotonic())
+        request_logger.error(
+            "request.exception",
+            extra={
+                "request_id": getattr(request, "request_id", ""),
+                "method": request.method,
+                "path": safe_request_path(request),
+                "status": 500,
+                "duration_ms": round((time.monotonic() - started_at) * 1000, 3),
+            },
+            exc_info=(type(exception), exception, exception.__traceback__),
+        )
+        return None
 
 
 class AuditTrailMiddleware:
@@ -72,7 +113,7 @@ class AuditTrailMiddleware:
             actor = candidate if getattr(candidate, "is_authenticated", False) else None
         kwargs = match.kwargs if match else {}
         resource_id = kwargs.get("pk") or kwargs.get("consultation_pk") or ""
-        patient_id = kwargs.get("patient_pk")
+        patient_id = getattr(request, "audit_patient_id", None) or kwargs.get("patient_pk")
         if base == "CONSULTATION" and patient_id is None and kwargs.get("pk"):
             patient_id = kwargs["pk"]
             resource_id = ""
@@ -102,13 +143,17 @@ class AuditTrailMiddleware:
     def _resource_name(match):
         if not match:
             return "API"
-        namespace = match.namespace.upper() if match.namespace else "API"
-        name = (match.url_name or "").upper()
+        view_name = match.view_name or match.url_name or ""
+        namespace, separator, name = view_name.rpartition(":")
+        namespace = namespace.upper() if separator else "API"
+        name = name.upper()
         if namespace == "PATIENTS":
             if "DOCUMENT" in name:
                 return "DOCUMENT"
             if "ODONTOGRAM" in name:
                 return "ODONTOGRAM"
+            if "TREATMENT-ITEM" in name:
+                return "TREATMENT_ITEM"
             if "CONSULTATION" in name:
                 return "CONSULTATION"
             return "PATIENT"
@@ -120,12 +165,40 @@ class AuditTrailMiddleware:
 
     @staticmethod
     def _action(base, method, url_name, request):
+        explicit_action = getattr(request, "audit_action", None)
+        if explicit_action:
+            return explicit_action
         if base.startswith(("AUTH_", "PASSWORD_")):
             return base
         if base == "DOCUMENT" and "content" in url_name:
             return "DOCUMENT_DOWNLOAD" if request.GET.get("download") == "true" else "DOCUMENT_VIEW"
+        if url_name == "appointment-start-attendance":
+            return "APPOINTMENT_START_ATTENDANCE"
+        if url_name == "appointment-check-in":
+            return "APPOINTMENT_CHECK_IN"
+        if url_name == "patient-duplicate-check":
+            return "PATIENT_DUPLICATE_CHECK"
+        if url_name == "patient-consultation-complete":
+            return "CONSULTATION_COMPLETE"
+        if url_name == "patient-consultation-cancel":
+            return "CONSULTATION_CANCEL"
+        treatment_actions = {
+            "consultation-treatment-item-accept": "TREATMENT_ITEM_ACCEPT",
+            "consultation-treatment-item-perform": "TREATMENT_ITEM_PERFORM",
+            "consultation-treatment-item-cancel": "TREATMENT_ITEM_CANCEL",
+        }
+        if url_name in treatment_actions:
+            return treatment_actions[url_name]
+        singleton_reads = {
+            "business-hours",
+            "clinic-profile",
+            "clinic-profile-options",
+            "consultation-odontogram",
+        }
         operation = {
-            "GET": "READ" if any(key in url_name for key in ("detail", "content", "avatar", "current-user")) else "LIST",
+            "GET": "READ" if url_name in singleton_reads or any(
+                key in url_name for key in ("detail", "content", "avatar", "current-user")
+            ) else "LIST",
             "POST": "CREATE",
             "PUT": "UPDATE",
             "PATCH": "UPDATE",

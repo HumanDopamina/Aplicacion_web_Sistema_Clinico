@@ -5,9 +5,18 @@ const HOUR_HEIGHT = 72
 
 export default function AppointmentTimeline({ appointments, selectedDate, onSelect, timeZone }) {
   if (appointments.length === 0) return null
-  const dentists = [...new Map(appointments.map((item) => [item.dentist, {
-    id: item.dentist, name: item.dentist_name,
-  }])).values()]
+  const dentistMap = new Map()
+  appointments.forEach((item) => {
+    const current = dentistMap.get(item.dentist)
+    dentistMap.set(item.dentist, {
+      id: item.dentist,
+      name: item.dentist_name,
+      appointmentCount: (current?.appointmentCount || 0) + 1,
+    })
+  })
+  const dentists = [...dentistMap.values()].sort((left, right) => (
+    left.name.localeCompare(right.name, 'es')
+  ))
   const laneByDentist = new Map(dentists.map((dentist, index) => [dentist.id, index]))
   const starts = appointments.map((item) => minutesFromClock(item.start_time))
   const ends = appointments.map((item) => minutesFromClock(item.end_time))
@@ -21,7 +30,7 @@ export default function AppointmentTimeline({ appointments, selectedDate, onSele
   return <section aria-label="Agenda diaria" className="appointment-timeline overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div className="timeline-heading" style={{ '--lane-count': dentists.length }}>
       <span aria-hidden="true" />
-      {dentists.map((dentist) => <div key={dentist.id} className="dentist-heading"><span className="dentist-dot" aria-hidden="true" />{dentist.name}</div>)}
+      {dentists.map((dentist) => <div key={dentist.id} className="dentist-heading"><span className="dentist-dot" aria-hidden="true" />{dentist.name} · {dentist.appointmentCount} {dentist.appointmentCount === 1 ? 'cita' : 'citas'}</div>)}
     </div>
     <div className="timeline-body" style={{ '--timeline-height': `${stageHeight}px`, '--lane-count': dentists.length }}>
       <div className="time-axis" aria-hidden="true">{hours.map((hour) => <span key={hour} style={{ top: `${(hour - startHour) * HOUR_HEIGHT}px` }}>{String(hour).padStart(2, '0')}:00</span>)}</div>

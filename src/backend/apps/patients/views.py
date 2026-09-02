@@ -1,36 +1,115 @@
-from django.db.models import F, Q, Window
-from django.db.models.functions import RowNumber
-from django.http import FileResponse, Http404
+from django.db.models import Case, F, IntegerField, Q, Value, When, Window
+from django.db.models.functions import Coalesce, RowNumber
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils.http import content_disposition_header
-from rest_framework import filters, generics, status
+from django.utils import timezone
+from rest_framework import filters, generics, serializers, status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.users.permissions import HasCapability, user_has_permission
 from apps.clinics.availability import clinic_today
+from apps.clinics.models import ClinicProfile
 from apps.common.pagination import StandardPageNumberPagination
 
-from .models import Consultation, OdontogramVersion, Patient, PatientDocument
+from .models import Consultation, OdontogramVersion, Patient, PatientDocument, TreatmentItem
+from .clinical_record_pdf import build_clinical_record_pdf
 from .odontograms import OdontogramConflict
+from .duplicates import find_possible_patient_duplicates
+from .services import (
+    ConsultationOperationError,
+    TreatmentItemOperationError,
+    accept_treatment_item,
+    cancel_treatment_item,
+    cancel_consultation,
+    complete_consultation,
+    perform_treatment_item,
+    require_active_patient,
+    require_complete_patient_profile,
+)
 from .serializers import (
     ConsultationSerializer,
     OdontogramRevisionCreateSerializer,
     OdontogramVersionSerializer,
     OdontogramVersionSummarySerializer,
-    PatientSerializer,
+    PatientDetailSerializer,
+    PatientDuplicateCheckSerializer,
     PatientDocumentBatchUploadSerializer,
+    PatientDocumentMetadataUpdateSerializer,
     PatientDocumentSerializer,
+    PatientOptionSerializer,
+    PatientSummarySerializer,
+    PossiblePatientDuplicateSerializer,
+    PlannedOdontogramOverlayItemSerializer,
+    LongitudinalTreatmentItemSerializer,
     RecentConsultationSerializer,
     RecentlyAttendedPatientSerializer,
+    TreatmentItemSerializer,
+    TreatmentItemConsultationSummarySerializer,
+    TreatmentItemCancelSerializer,
+    TreatmentItemPerformSerializer,
 )
+
+
+PATIENT_LIST_ORDERING = {
+    "code": ("code", "pk"),
+    "-code": ("-code", "-pk"),
+    "name": ("first_name", "last_name", "second_last_name", "pk"),
+    "-name": ("-first_name", "-last_name", "-second_last_name", "-pk"),
+    "created_at": ("created_at", "pk"),
+    "-created_at": ("-created_at", "-pk"),
+    "is_active": ("is_active", "pk"),
+    "-is_active": ("-is_active", "-pk"),
+}
+
+
+class CanExportClinicalRecord(BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and user_has_permission(request.user, "patients.view")
+            and user_has_permission(request.user, "consultations.view")
+        )
+
+
+class PatientClinicalRecordExportView(APIView):
+    permission_classes = (IsAuthenticated, CanExportClinicalRecord)
+
+    def get(self, request, pk):
+        request._request.audit_action = "CLINICAL_RECORD_EXPORT"
+        patient = get_object_or_404(
+            Patient.objects.select_related("clinical_record"),
+            pk=pk,
+        )
+        clinic = ClinicProfile.objects.filter(pk=1).first() or ClinicProfile()
+        content = build_clinical_record_pdf(
+            patient=patient,
+            clinic=clinic,
+            generated_at=timezone.now(),
+        )
+        safe_code = "".join(
+            character if character.isalnum() or character in "-_" else "-"
+            for character in str(patient.code or patient.pk)
+        )
+        response = HttpResponse(content, content_type="application/pdf")
+        response["Content-Disposition"] = content_disposition_header(
+            True,
+            f"expediente-clinico-{safe_code}.pdf",
+        )
+        response["Cache-Control"] = "private, no-store"
+        response["Pragma"] = "no-cache"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 class PatientListCreateView(generics.ListCreateAPIView):
     queryset = Patient.objects.select_related("registered_by").all()
-    serializer_class = PatientSerializer
+    serializer_class = PatientDetailSerializer
     permission_classes = (IsAuthenticated, HasCapability)
     required_permissions = {
         "GET": "patients.view",
@@ -43,10 +122,51 @@ class PatientListCreateView(generics.ListCreateAPIView):
         "first_name",
         "last_name",
         "second_last_name",
-        "national_id",
+        "identification_number",
         "phone",
         "email",
     )
+
+    def get_queryset(self):
+        requested_ordering = self.request.query_params.get(
+            "ordering",
+            "-created_at",
+        ).strip()
+        ordering = PATIENT_LIST_ORDERING.get(requested_ordering)
+        if ordering is None:
+            raise serializers.ValidationError({
+                "ordering": (
+                    "Selecciona code, name, created_at o is_active, "
+                    "con un prefijo - opcional."
+                ),
+            })
+        return super().get_queryset().order_by(*ordering)
+
+    def get_serializer_class(self):
+        if self.request.method == "GET":
+            return PatientSummarySerializer
+        return PatientDetailSerializer
+
+    def get_serializer_context(self):
+        return {
+            **super().get_serializer_context(),
+            "quick_create": (
+                self.request.method == "POST"
+                and self.request.query_params.get("mode") == "quick"
+            ),
+        }
+
+    def create(self, request, *args, **kwargs):
+        if request.query_params.get("mode") != "quick":
+            return super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        option_data = PatientOptionSerializer(
+            serializer.instance,
+            context=self.get_serializer_context(),
+        ).data
+        return Response(option_data, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
         serializer.save(registered_by=self.request.user)
@@ -54,7 +174,7 @@ class PatientListCreateView(generics.ListCreateAPIView):
 
 class PatientDetailView(generics.RetrieveUpdateAPIView):
     queryset = Patient.objects.select_related("registered_by").all()
-    serializer_class = PatientSerializer
+    serializer_class = PatientDetailSerializer
     permission_classes = (IsAuthenticated, HasCapability)
     required_permissions = {
         "GET": "patients.view",
@@ -63,8 +183,70 @@ class PatientDetailView(generics.RetrieveUpdateAPIView):
     http_method_names = ("get", "patch", "head", "options")
 
 
+class PatientOptionListView(generics.ListAPIView):
+    serializer_class = PatientOptionSerializer
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "appointments.create"}
+    filter_backends = (filters.SearchFilter,)
+    pagination_class = None
+    search_fields = (
+        "code",
+        "first_name",
+        "last_name",
+        "second_last_name",
+        "identification_number",
+        "phone",
+    )
+
+    def get_queryset(self):
+        search = self.request.query_params.get("search", "").strip()
+        if len(search) < 2:
+            return Patient.objects.none()
+        return Patient.objects.filter(is_active=True).order_by(
+            "first_name",
+            "last_name",
+            "pk",
+        )
+
+    def filter_queryset(self, queryset):
+        return super().filter_queryset(queryset)[:20]
+
+
+class PatientDuplicateCheckPermission(BasePermission):
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        exclude_patient_id = request.data.get("exclude_patient_id")
+        permission = (
+            "patients.edit"
+            if exclude_patient_id not in (None, "")
+            else "patients.create"
+        )
+        return user_has_permission(request.user, permission)
+
+
+class PatientDuplicateCheckView(APIView):
+    permission_classes = (IsAuthenticated, PatientDuplicateCheckPermission)
+
+    def post(self, request):
+        serializer = PatientDuplicateCheckSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        matches = find_possible_patient_duplicates(**serializer.validated_data)
+        return Response({
+            "has_matches": bool(matches),
+            "matches": PossiblePatientDuplicateSerializer(matches, many=True).data,
+        })
+
+
 def professional_display_name(user):
     return user.get_full_name().strip() or user.email
+
+
+def consultation_operation_error_response(error):
+    payload = {"code": error.code, "detail": error.detail}
+    if error.missing_fields:
+        payload["missing_fields"] = list(error.missing_fields)
+    return Response(payload, status=status.HTTP_409_CONFLICT)
 
 
 class RecentConsultationListView(generics.ListAPIView):
@@ -124,17 +306,138 @@ class PatientConsultationListView(generics.ListCreateAPIView):
         "POST": "consultations.create",
     }
 
+    def get_patient(self):
+        if not hasattr(self, "_patient"):
+            self._patient = get_object_or_404(Patient, pk=self.kwargs["pk"])
+        return self._patient
+
+    def get_serializer_class(self):
+        if (
+            self.request.method == "GET"
+            and self.request.query_params.get("compact", "").lower() == "true"
+        ):
+            return TreatmentItemConsultationSummarySerializer
+        return ConsultationSerializer
+
     def get_queryset(self):
-        pk = self.kwargs["pk"]
-        get_object_or_404(Patient, pk=pk)
-        return Consultation.objects.select_related("professional").filter(patient_id=pk)
+        patient = self.get_patient()
+        if self.request.query_params.get("compact", "").lower() == "true":
+            return Consultation.objects.filter(patient_id=patient.pk).only("id", "date")
+        return Consultation.objects.select_related("professional").filter(
+            patient_id=patient.pk
+        )
+
+    def create(self, request, *args, **kwargs):
+        patient = self.get_patient()
+        request._request.audit_patient_id = patient.pk
+        try:
+            return super().create(request, *args, **kwargs)
+        except ConsultationOperationError as error:
+            return consultation_operation_error_response(error)
 
     def perform_create(self, serializer):
-        patient = get_object_or_404(Patient, pk=self.kwargs["pk"])
+        patient = self.get_patient()
+        require_active_patient(patient)
+        require_complete_patient_profile(patient)
         serializer.save(
             patient=patient,
             professional=self.request.user,
             professional_name_snapshot=professional_display_name(self.request.user),
+        )
+
+
+class PatientTreatmentItemListView(generics.ListAPIView):
+    serializer_class = LongitudinalTreatmentItemSerializer
+    pagination_class = StandardPageNumberPagination
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "consultations.view"}
+
+    def get_queryset(self):
+        patient_id = self.kwargs["pk"]
+        get_object_or_404(Patient, pk=patient_id)
+        self.request.audit_patient_id = patient_id
+        requested_status = self.request.query_params.get("status", "").strip()
+        requested_scope = self.request.query_params.get("scope", "").strip()
+        if requested_status and requested_scope:
+            raise serializers.ValidationError(
+                {"detail": "Utiliza status o scope, no ambos filtros a la vez."}
+            )
+        if requested_status and requested_status not in TreatmentItem.Status.values:
+            raise serializers.ValidationError(
+                {"status": "Selecciona un estado de tratamiento válido."}
+            )
+        if requested_scope and requested_scope not in ("pending", "history"):
+            raise serializers.ValidationError(
+                {"scope": "Selecciona pending o history."}
+            )
+
+        queryset = TreatmentItem.objects.select_related(
+            "proposed_in",
+            "performed_in",
+            "service",
+            "service__category",
+        ).filter(proposed_in__patient_id=patient_id)
+        if requested_status:
+            queryset = queryset.filter(status=requested_status)
+        elif requested_scope == "pending":
+            queryset = queryset.filter(status__in=(
+                TreatmentItem.Status.PROPOSED,
+                TreatmentItem.Status.ACCEPTED,
+            ))
+        elif requested_scope == "history":
+            queryset = queryset.filter(status__in=(
+                TreatmentItem.Status.PERFORMED,
+                TreatmentItem.Status.CANCELLED,
+            ))
+
+        pending_order = Case(
+            When(status=TreatmentItem.Status.ACCEPTED, then=Value(0)),
+            When(status=TreatmentItem.Status.PROPOSED, then=Value(1)),
+            default=Value(2),
+            output_field=IntegerField(),
+        )
+        if requested_scope == "pending" or requested_status in (
+            TreatmentItem.Status.PROPOSED,
+            TreatmentItem.Status.ACCEPTED,
+        ):
+            return queryset.annotate(_status_order=pending_order).order_by(
+                "_status_order",
+                "proposed_in__date",
+                "pk",
+            )
+        if requested_scope == "history" or requested_status in (
+            TreatmentItem.Status.PERFORMED,
+            TreatmentItem.Status.CANCELLED,
+        ):
+            return queryset.annotate(
+                _event_at=Coalesce("performed_at", "updated_at", "created_at")
+            ).order_by("-_event_at", "-proposed_in__date", "-pk")
+        return queryset.order_by("-updated_at", "-pk")
+
+
+class PatientPlannedOdontogramOverlayView(generics.ListAPIView):
+    serializer_class = PlannedOdontogramOverlayItemSerializer
+    pagination_class = None
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "consultations.view"}
+
+    def get_queryset(self):
+        patient_id = self.kwargs["pk"]
+        get_object_or_404(Patient, pk=patient_id)
+        self.request.audit_patient_id = patient_id
+        return (
+            TreatmentItem.objects.select_related("proposed_in")
+            .filter(
+                proposed_in__patient_id=patient_id,
+                status__in=(
+                    TreatmentItem.Status.PROPOSED,
+                    TreatmentItem.Status.ACCEPTED,
+                ),
+                tooth_code__isnull=False,
+            )
+            .exclude(tooth_code="")
+            .exclude(planned_finding="")
+            .order_by("proposed_in__date", "pk")
         )
 
 
@@ -149,9 +452,204 @@ class PatientConsultationDetailView(generics.RetrieveUpdateAPIView):
     http_method_names = ("get", "patch", "head", "options")
 
     def get_queryset(self):
-        return Consultation.objects.select_related("professional").filter(
+        return Consultation.objects.select_related("patient", "professional").filter(
             patient_id=self.kwargs["patient_pk"]
         )
+
+
+class PatientConsultationOperationView(generics.GenericAPIView):
+    serializer_class = ConsultationSerializer
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"POST": "consultations.edit"}
+    operation = None
+
+    def get_queryset(self):
+        return Consultation.objects.filter(patient_id=self.kwargs["patient_pk"])
+
+    def post(self, request, *args, **kwargs):
+        consultation = self.get_object()
+        request._request.audit_patient_id = consultation.patient_id
+        try:
+            result = self.operation(
+                consultation_id=consultation.pk,
+                actor=request.user,
+            )
+        except ConsultationOperationError as error:
+            return consultation_operation_error_response(error)
+        request.audit_metadata.update({"consultation_id": result.consultation.pk})
+        if result.appointment is not None:
+            request.audit_metadata["appointment_id"] = result.appointment.pk
+        from apps.appointments.serializers import AppointmentSerializer
+
+        return Response({
+            "consultation": ConsultationSerializer(
+                result.consultation,
+                context=self.get_serializer_context(),
+            ).data,
+            "appointment": (
+                AppointmentSerializer(result.appointment).data
+                if result.appointment is not None
+                else None
+            ),
+        })
+
+
+class PatientConsultationCompleteView(PatientConsultationOperationView):
+    operation = staticmethod(complete_consultation)
+
+
+class PatientConsultationCancelView(PatientConsultationOperationView):
+    operation = staticmethod(cancel_consultation)
+
+
+class ConsultationTreatmentItemMixin:
+    permission_classes = (IsAuthenticated, HasCapability)
+
+    def get_consultation(self):
+        if not hasattr(self, "_consultation"):
+            self._consultation = get_object_or_404(
+                Consultation.objects.select_related("patient"),
+                pk=self.kwargs["consultation_pk"],
+                patient_id=self.kwargs["patient_pk"],
+            )
+        return self._consultation
+
+    def get_serializer_context(self):
+        return {
+            **super().get_serializer_context(),
+            "consultation": self.get_consultation(),
+        }
+
+    def get_queryset(self):
+        consultation = self.get_consultation()
+        return TreatmentItem.objects.select_related("service", "service__category").filter(
+            proposed_in=consultation,
+        )
+
+
+class ConsultationTreatmentItemListCreateView(
+    ConsultationTreatmentItemMixin,
+    generics.ListCreateAPIView,
+):
+    serializer_class = TreatmentItemSerializer
+    required_permissions = {
+        "GET": "consultations.view",
+        "POST": "consultations.edit",
+    }
+    pagination_class = None
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except TreatmentItemOperationError as error:
+            return Response(
+                {"code": error.code, "detail": error.detail},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    def perform_create(self, serializer):
+        consultation = self.get_consultation()
+        require_active_patient(
+            consultation.patient,
+            error_class=TreatmentItemOperationError,
+        )
+        item = serializer.save(proposed_in=consultation)
+        self.request.audit_metadata.update({
+            "consultation_id": consultation.pk,
+            "treatment_item_id": item.pk,
+        })
+
+
+class ConsultationTreatmentItemDetailView(
+    ConsultationTreatmentItemMixin,
+    generics.RetrieveUpdateAPIView,
+):
+    serializer_class = TreatmentItemSerializer
+    required_permissions = {
+        "GET": "consultations.view",
+        "PATCH": "consultations.edit",
+    }
+    http_method_names = ("get", "patch", "head", "options")
+
+    def perform_update(self, serializer):
+        item = serializer.save()
+        self.request.audit_metadata.update({
+            "consultation_id": item.proposed_in_id,
+            "treatment_item_id": item.pk,
+        })
+
+
+class ConsultationTreatmentItemOperationView(
+    ConsultationTreatmentItemMixin,
+    generics.GenericAPIView,
+):
+    serializer_class = TreatmentItemSerializer
+    required_permissions = {"POST": "consultations.edit"}
+    operation = None
+
+    def operation_kwargs(self, request):
+        return {}
+
+    def post(self, request, *args, **kwargs):
+        scoped_item = self.get_object()
+        try:
+            item = self.operation(
+                treatment_item_id=scoped_item.pk,
+                actor=request.user,
+                **self.operation_kwargs(request),
+            )
+        except TreatmentItemOperationError as error:
+            return Response(
+                {"code": error.code, "detail": error.detail},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except Consultation.DoesNotExist as error:
+            raise Http404("La consulta de realización no existe.") from error
+
+        transition_from = getattr(item, "_transition_from", scoped_item.status)
+        request.audit_metadata.update({
+            "consultation_id": item.proposed_in_id,
+            "origin_consultation_id": item.proposed_in_id,
+            "performed_in_id": item.performed_in_id,
+            "treatment_item_id": item.pk,
+            "transition": f"{transition_from}->{item.status}",
+        })
+        if item.resulting_odontogram_version_id is not None:
+            request.audit_metadata.update({
+                "odontogram_result_registered": True,
+                "resulting_odontogram_version_id": item.resulting_odontogram_version_id,
+            })
+        return Response(
+            TreatmentItemSerializer(
+                item,
+                context=self.get_serializer_context(),
+            ).data
+        )
+
+
+class ConsultationTreatmentItemAcceptView(ConsultationTreatmentItemOperationView):
+    operation = staticmethod(accept_treatment_item)
+
+
+class ConsultationTreatmentItemPerformView(ConsultationTreatmentItemOperationView):
+    operation = staticmethod(perform_treatment_item)
+
+    def operation_kwargs(self, request):
+        serializer = TreatmentItemPerformSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return {
+            "performed_in_id": serializer.validated_data["performed_in"],
+            "odontogram_result": serializer.validated_data.get("odontogram_result"),
+        }
+
+
+class ConsultationTreatmentItemCancelView(ConsultationTreatmentItemOperationView):
+    operation = staticmethod(cancel_treatment_item)
+
+    def operation_kwargs(self, request):
+        serializer = TreatmentItemCancelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return {"reason": serializer.validated_data.get("reason", "")}
 
 
 class ConsultationOdontogramView(generics.RetrieveAPIView):
@@ -261,13 +759,27 @@ class PatientDocumentListCreateView(APIView):
 
     def get(self, request, patient_pk):
         self.get_patient()
-        queryset = PatientDocument.objects.select_related("uploaded_by").filter(
+        queryset = PatientDocument.objects.select_related(
+            "uploaded_by",
+            "consultation",
+        ).filter(
             patient_id=patient_pk,
         )
         category = request.query_params.get("category", "").strip()
         search = request.query_params.get("search", "").strip()
         if category:
             queryset = queryset.filter(category__iexact=category)
+        consultation_id = request.query_params.get("consultation_id", "").strip()
+        if consultation_id:
+            if not user_has_permission(request.user, "consultations.view"):
+                raise PermissionDenied(
+                    "No tienes permiso para filtrar por contexto clínico."
+                )
+            if not consultation_id.isdecimal():
+                raise serializers.ValidationError({
+                    "consultation_id": "Indica una consulta válida."
+                })
+            queryset = queryset.filter(consultation_id=int(consultation_id))
         if search:
             queryset = queryset.filter(
                 Q(original_name__icontains=search)
@@ -296,6 +808,14 @@ class PatientDocumentListCreateView(APIView):
         )
         serializer.is_valid(raise_exception=True)
         documents = serializer.save()
+        request._request.audit_changed_fields = sorted({
+            "category",
+            *(
+                field
+                for field in ("consultation_id", "tooth_code")
+                if field in request.data
+            ),
+        })
         return Response(
             PatientDocumentSerializer(
                 documents,
@@ -308,11 +828,39 @@ class PatientDocumentListCreateView(APIView):
 
 class PatientDocumentDeleteView(APIView):
     permission_classes = (IsAuthenticated, HasCapability)
-    required_permissions = {"DELETE": "documents.delete"}
+    required_permissions = {
+        "PATCH": "documents.create",
+        "DELETE": "documents.delete",
+    }
+
+    def get_patient_and_document(self, patient_pk, pk):
+        patient = get_object_or_404(Patient, pk=patient_pk)
+        document = get_object_or_404(
+            PatientDocument.objects.select_related("uploaded_by", "consultation"),
+            pk=pk,
+            patient=patient,
+        )
+        return patient, document
+
+    def patch(self, request, patient_pk, pk):
+        patient, document = self.get_patient_and_document(patient_pk, pk)
+        if not patient.is_active:
+            return Response(
+                {"detail": "El paciente está inactivo; sus documentos son de solo lectura."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = PatientDocumentMetadataUpdateSerializer(
+            document,
+            data=request.data,
+            partial=True,
+            context={"request": request, "patient": patient},
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
     def delete(self, request, patient_pk, pk):
-        patient = get_object_or_404(Patient, pk=patient_pk)
-        document = get_object_or_404(PatientDocument, pk=pk, patient=patient)
+        patient, document = self.get_patient_and_document(patient_pk, pk)
         if not patient.is_active:
             return Response(
                 {"detail": "El paciente está inactivo; sus documentos son de solo lectura."},

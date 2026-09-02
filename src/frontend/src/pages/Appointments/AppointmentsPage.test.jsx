@@ -1,15 +1,33 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  createMemoryRouter,
+  MemoryRouter,
+  Route,
+  RouterProvider,
+  Routes,
+} from 'react-router-dom'
 import { AuthContext } from '../../context/authContextValue'
 import * as appointmentService from '../../services/appointmentService'
-import { listAllPatients } from '../../services/patientService'
+import { listAllPatients, searchPatientOptions } from '../../services/patientService'
 import { listClinicServices } from '../../services/clinicService'
 import AppointmentsPage from './AppointmentsPage'
+import ConsultationRecordPage from '../Patients/ConsultationRecordPage'
 
-vi.mock('../../services/appointmentService')
+vi.mock('../../services/appointmentService', async (importOriginal) => ({
+  ...await importOriginal(),
+  createAppointment: vi.fn(),
+  getAvailableDentists: vi.fn(),
+  listAllAppointments: vi.fn(),
+  startAppointmentAttendance: vi.fn(),
+  updateAppointment: vi.fn(),
+  checkInAppointment: vi.fn(),
+  listAppointmentReschedules: vi.fn(),
+}))
 vi.mock('../../services/patientService', async (importOriginal) => ({
   ...await importOriginal(),
   listAllPatients: vi.fn(),
+  searchPatientOptions: vi.fn(),
 }))
 vi.mock('../../services/clinicService', () => ({ listClinicServices: vi.fn() }))
 
@@ -61,16 +79,68 @@ const appointment = (overrides = {}) => ({
 
 const receptionist = {
   role: 'RECEPCIONISTA',
-  permissions: ['appointments.view', 'appointments.create', 'appointments.edit'],
+  permissions: ['patients.view', 'appointments.view', 'appointments.create', 'appointments.edit'],
 }
 const odontologist = { role: 'ODONTOLOGO', permissions: ['appointments.view'] }
 
-function renderPage(user = receptionist) {
+function PageHarness({ user }) {
+  return <AuthContext.Provider value={{ user, accessToken: 'access-token' }}>
+    <Routes>
+      <Route path="/citas" element={<AppointmentsPage />} />
+      <Route path="/pacientes/:patientId" element={<p>Expediente del paciente</p>} />
+      <Route
+        path="/pacientes/:patientId/consultas/:consultationId"
+        element={<p>Consulta clínica destino</p>}
+      />
+    </Routes>
+  </AuthContext.Provider>
+}
+
+function renderPage(user = receptionist, initialEntries = ['/citas']) {
   return render(
-    <AuthContext.Provider value={{ user, accessToken: 'access-token' }}>
-      <AppointmentsPage />
-    </AuthContext.Provider>,
+    <MemoryRouter initialEntries={initialEntries}>
+      <PageHarness user={user} />
+    </MemoryRouter>,
   )
+}
+
+const followUpPrefill = (overrides = {}) => ({
+  patient: {
+    id: patient.id,
+    code: patient.code,
+    full_name: patient.full_name,
+    phone: patient.phone,
+    date_of_birth: null,
+  },
+  dentist,
+  treatment: {
+    id: 15,
+    description: 'Restauración de resina',
+    service: { id: 4, name: 'Restauración simple', is_active: true },
+  },
+  ...overrides,
+})
+
+function renderFollowUpPage(prefill = followUpPrefill(), user = receptionist) {
+  return renderPage(user, [{
+    pathname: '/citas',
+    state: { appointmentPrefill: prefill },
+  }])
+}
+
+function renderClinicalFlow(user) {
+  const context = { user, accessToken: 'access-token' }
+  const router = createMemoryRouter([
+    {
+      path: '/citas',
+      element: <AuthContext.Provider value={context}><AppointmentsPage /></AuthContext.Provider>,
+    },
+    {
+      path: '/pacientes/:patientId/consultas/:consultationId',
+      element: <AuthContext.Provider value={context}><ConsultationRecordPage /></AuthContext.Provider>,
+    },
+  ], { initialEntries: ['/citas'] })
+  return render(<RouterProvider router={router} />)
 }
 
 describe('AppointmentsPage', () => {
@@ -79,6 +149,21 @@ describe('AppointmentsPage', () => {
     appointmentService.listAllAppointments.mockResolvedValue([appointment()])
     appointmentService.getAvailableDentists.mockResolvedValue([dentist])
     appointmentService.createAppointment.mockResolvedValue(appointment())
+    appointmentService.listAppointmentReschedules.mockResolvedValue([])
+    appointmentService.checkInAppointment.mockResolvedValue({
+      appointment: appointment({ status: 'PRESENTE', status_display: 'Presente' }),
+      changed: true,
+    })
+    appointmentService.startAppointmentAttendance.mockResolvedValue({
+      appointment: appointment({
+        status: 'EN_ATENCION',
+        status_display: 'En atención',
+        consultation: 41,
+        attendance_started_at: `${localDate()}T15:05:00Z`,
+      }),
+      consultation: { id: 41 },
+      created: true,
+    })
     appointmentService.updateAppointment.mockImplementation((access, id, changes) => {
       const labels = {
         CONFIRMADA: 'Confirmada', COMPLETADA: 'Completada', CANCELADA: 'Cancelada', NO_ASISTIO: 'No asistió',
@@ -89,11 +174,13 @@ describe('AppointmentsPage', () => {
       }))
     })
     listAllPatients.mockResolvedValue([patient])
+    searchPatientOptions.mockResolvedValue([patient])
   })
 
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('shows the daily agenda and appointment context', async () => {
@@ -102,8 +189,55 @@ describe('AppointmentsPage', () => {
     expect(screen.getByRole('heading', { name: 'Citas' })).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ })).toBeInTheDocument()
     expect(screen.getByText('Valoración de ortodoncia')).toBeInTheDocument()
-    expect(screen.getAllByText('Dra. Elena Vargas')).toHaveLength(2)
+    expect(screen.getByText('Dra. Elena Vargas · 1 cita')).toBeInTheDocument()
+    expect(screen.getByText('Dra. Elena Vargas', { selector: 'small' })).toBeInTheDocument()
     expect(screen.getByText('Programada')).toBeInTheDocument()
+  })
+
+  it('[HU-19] identifies each professional and shows their daily load', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([
+      appointment(),
+      appointment({
+        id: 10,
+        patient: 2,
+        patient_name: 'Luis Mendoza',
+        patient_code: 'PAC-00002',
+        start_time: '10:00:00',
+        end_time: '10:30:00',
+        duration_minutes: 30,
+      }),
+      appointment({
+        id: 11,
+        patient: 3,
+        patient_name: 'María Ruiz',
+        patient_code: 'PAC-00003',
+        dentist: 4,
+        dentist_name: 'Dr. Mario Ruiz',
+        start_time: '11:00:00',
+        end_time: '11:45:00',
+        duration_minutes: 45,
+      }),
+    ])
+
+    renderPage()
+
+    expect(await screen.findByText('Dra. Elena Vargas · 2 citas')).toBeInTheDocument()
+    expect(screen.getByText('Dr. Mario Ruiz · 1 cita')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /María Ruiz, 11:00 a 11:45/ })).toBeInTheDocument()
+    expect(appointmentService.listAllAppointments).toHaveBeenCalledWith(
+      'access-token',
+      { date: localDate() },
+    )
+  })
+
+  it('loads the agenda without downloading every patient page', async () => {
+    renderPage()
+
+    await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ })
+
+    expect(listAllPatients).not.toHaveBeenCalled()
+    expect(searchPatientOptions).not.toHaveBeenCalled()
   })
 
   it('navigates days and keeps create controls behind permissions', async () => {
@@ -117,11 +251,7 @@ describe('AppointmentsPage', () => {
     expect(dateInput.value).not.toBe(initialDate)
     expect(screen.getByRole('button', { name: 'Nueva cita' })).toBeInTheDocument()
 
-    rerender(
-      <AuthContext.Provider value={{ user: odontologist, accessToken: 'access-token' }}>
-        <AppointmentsPage />
-      </AuthContext.Provider>,
-    )
+    rerender(<MemoryRouter initialEntries={['/citas']}><PageHarness user={odontologist} /></MemoryRouter>)
     expect(screen.queryByRole('button', { name: 'Nueva cita' })).not.toBeInTheDocument()
   })
 
@@ -192,6 +322,15 @@ describe('AppointmentsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }))
     const dialog = screen.getByRole('dialog', { name: 'Nueva cita' })
+    fireEvent.change(within(dialog).getByLabelText('Buscar paciente'), {
+      target: { value: 'Ana' },
+    })
+    await waitFor(() => expect(searchPatientOptions).toHaveBeenCalledWith(
+      'access-token', 'Ana', expect.any(AbortSignal),
+    ))
+    await waitFor(() => expect(
+      within(dialog).getByRole('option', { name: 'Ana Pérez · PAC-00001' }),
+    ).toBeInTheDocument())
     fireEvent.change(within(dialog).getByLabelText('Paciente'), { target: { value: '1' } })
     fireEvent.change(within(dialog).getByLabelText(/Servicio/), { target: { value: '4' } })
     expect(within(dialog).getByLabelText('Duración')).toHaveValue('45')
@@ -205,8 +344,141 @@ describe('AppointmentsPage', () => {
     expect(screen.getByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ })).toBeInTheDocument()
     expect(screen.queryByRole('dialog', { name: 'Nueva cita' })).not.toBeInTheDocument()
     expect(appointmentService.createAppointment).toHaveBeenCalledWith(
-      'access-token', expect.objectContaining({ service: 4, duration_minutes: 45, reason: 'Control de ortodoncia' }),
+      'access-token', expect.objectContaining({
+        patient: 1,
+        service: 4,
+        duration_minutes: 45,
+        reason: 'Control de ortodoncia',
+      }),
     )
+  })
+
+  it('[HU-52] exposes quick-create in the real agenda only with patients.create', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([])
+    searchPatientOptions.mockResolvedValue([])
+    const authorized = {
+      ...receptionist,
+      permissions: [...receptionist.permissions, 'patients.create'],
+    }
+    renderPage(authorized)
+    await screen.findByText('No hay citas programadas para este día.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }))
+    const appointmentDialog = screen.getByRole('dialog', { name: 'Nueva cita' })
+    fireEvent.change(within(appointmentDialog).getByLabelText('Buscar paciente'), {
+      target: { value: 'Sin resultado' },
+    })
+
+    await waitFor(() => expect(searchPatientOptions).toHaveBeenCalled())
+    expect(await within(appointmentDialog).findByRole('button', {
+      name: 'Crear paciente',
+    })).toBeInTheDocument()
+  })
+
+  it('[HU-52] keeps quick-create hidden for appointment creators without patients.create', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([])
+    searchPatientOptions.mockResolvedValue([])
+    renderPage(receptionist)
+    await screen.findByText('No hay citas programadas para este día.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }))
+    const appointmentDialog = screen.getByRole('dialog', { name: 'Nueva cita' })
+    fireEvent.change(within(appointmentDialog).getByLabelText('Buscar paciente'), {
+      target: { value: 'Sin resultado' },
+    })
+
+    await waitFor(() => expect(searchPatientOptions).toHaveBeenCalled())
+    expect(within(appointmentDialog).queryByRole('button', {
+      name: 'Crear paciente',
+    })).not.toBeInTheDocument()
+  })
+
+  it('[HU-51] consumes follow-up state and opens the normal form with current catalog defaults', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([])
+    listClinicServices.mockResolvedValue([{
+      id: 4, name: 'Restauración simple', duration_minutes: 45, is_active: true,
+    }])
+
+    renderFollowUpPage()
+
+    const dialog = await screen.findByRole('dialog', { name: 'Nueva cita' })
+    expect(within(dialog).getByLabelText('Paciente')).toHaveValue('1')
+    expect(within(dialog).getByRole('option', { name: 'Ana Pérez · PAC-00001' })).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('Odontólogo')).toHaveValue('3')
+    expect(within(dialog).getByLabelText(/Servicio/)).toHaveValue('4')
+    expect(within(dialog).getByLabelText('Duración')).toHaveValue('45')
+    expect(within(dialog).getByLabelText('Motivo')).toHaveValue('Restauración de resina')
+    expect(within(dialog).getByLabelText('Fecha')).toHaveValue('')
+    expect(within(dialog).getByLabelText('Hora')).toHaveValue('')
+    expect(searchPatientOptions).not.toHaveBeenCalled()
+    expect(appointmentService.getAvailableDentists).not.toHaveBeenCalled()
+  })
+
+  it('[HU-51] creates a normal appointment once after the user chooses date and time', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([])
+    listClinicServices.mockResolvedValue([{
+      id: 4, name: 'Restauración simple', duration_minutes: 45, is_active: true,
+    }])
+    let releaseCreation
+    appointmentService.createAppointment.mockReturnValue(new Promise((resolve) => {
+      releaseCreation = resolve
+    }))
+    renderFollowUpPage()
+    const dialog = await screen.findByRole('dialog', { name: 'Nueva cita' })
+
+    fireEvent.change(within(dialog).getByLabelText('Fecha'), { target: { value: datePlus(1) } })
+    fireEvent.change(within(dialog).getByLabelText('Hora'), { target: { value: '10:30' } })
+    await waitFor(() => expect(appointmentService.getAvailableDentists).toHaveBeenCalledWith(
+      'access-token',
+      expect.objectContaining({ date: datePlus(1), startTime: '10:30', durationMinutes: '45' }),
+    ))
+    await waitFor(() => expect(within(dialog).getByLabelText('Odontólogo')).toHaveValue('3'))
+
+    const submit = within(dialog).getByRole('button', { name: 'Programar cita' })
+    fireEvent.click(submit)
+    fireEvent.click(submit)
+
+    expect(within(dialog).getByRole('button', { name: 'Guardando…' })).toBeDisabled()
+    expect(appointmentService.createAppointment).toHaveBeenCalledTimes(1)
+    expect(appointmentService.createAppointment).toHaveBeenCalledWith('access-token', {
+      patient: 1,
+      dentist: 3,
+      service: 4,
+      date: datePlus(1),
+      start_time: '10:30',
+      duration_minutes: 45,
+      reason: 'Restauración de resina',
+      notes: '',
+    })
+
+    releaseCreation(appointment({
+      date: datePlus(1),
+      start_time: '10:30:00',
+      end_time: '11:15:00',
+      duration_minutes: 45,
+      reason: 'Restauración de resina',
+      service: 4,
+      service_name: 'Restauración simple',
+    }))
+    expect(await screen.findByText('Cita programada.')).toBeInTheDocument()
+  })
+
+  it('[HU-51] does not preselect an inactive historical service', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([])
+    listClinicServices.mockResolvedValue([{
+      id: 4, name: 'Restauración simple', duration_minutes: 45, is_active: false,
+    }])
+    renderFollowUpPage(followUpPrefill({
+      treatment: {
+        id: 15,
+        description: 'Restauración de resina',
+        service: { id: 4, name: 'Restauración simple', is_active: false },
+      },
+    }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Nueva cita' })
+    expect(within(dialog).getByLabelText(/Servicio/)).toHaveValue('')
+    expect(within(dialog).getByText('Restauración simple no está disponible para nuevas citas.')).toBeInTheDocument()
   })
 
   it('preserves the form and explains a scheduling conflict', async () => {
@@ -218,6 +490,12 @@ describe('AppointmentsPage', () => {
     await screen.findByText('No hay citas programadas para este día.')
     fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }))
     const dialog = screen.getByRole('dialog', { name: 'Nueva cita' })
+    fireEvent.change(within(dialog).getByLabelText('Buscar paciente'), {
+      target: { value: 'Ana' },
+    })
+    await waitFor(() => expect(
+      within(dialog).getByRole('option', { name: 'Ana Pérez · PAC-00001' }),
+    ).toBeInTheDocument())
     fireEvent.change(within(dialog).getByLabelText('Paciente'), { target: { value: '1' } })
     await waitFor(() => expect(within(dialog).getByLabelText('Odontólogo').options.length).toBe(2))
     fireEvent.change(within(dialog).getByLabelText('Odontólogo'), { target: { value: '3' } })
@@ -268,5 +546,327 @@ describe('AppointmentsPage', () => {
     expect(await screen.findByText('Cita cancelada.')).toBeInTheDocument()
     expect(screen.getAllByText('Cancelada')).toHaveLength(2)
     expect(screen.getByText('Paciente reprogramará después.')).toBeInTheDocument()
+  })
+
+  it('[HU-23] lets reception register arrival without offering clinical start', async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    expect(screen.getByRole('button', { name: 'Registrar llegada' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Iniciar atención' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Registrar llegada' }))
+
+    expect(await screen.findByText('Llegada registrada.')).toBeInTheDocument()
+    expect(appointmentService.checkInAppointment).toHaveBeenCalledTimes(1)
+    expect(appointmentService.checkInAppointment).toHaveBeenCalledWith('access-token', 9)
+    expect(screen.getAllByText('Presente')).not.toHaveLength(0)
+  })
+
+  it('[HU-23] offers normal attendance start after a checked-in appointment', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([
+      appointment({ status: 'PRESENTE', status_display: 'Presente' }),
+    ])
+    renderPage({
+      role: 'ODONTOLOGO',
+      permissions: ['appointments.view', 'consultations.create', 'consultations.view'],
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    expect(screen.queryByRole('button', { name: 'Registrar llegada' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Iniciar atención' })).toBeInTheDocument()
+  })
+
+  it('[HU-58] loads and renders compact reschedule history only for an open detail', async () => {
+    appointmentService.listAppointmentReschedules.mockResolvedValue([{
+      id: 31,
+      previous_date: '2026-08-31',
+      previous_start_time: '09:00:00',
+      previous_duration_minutes: 60,
+      new_date: localDate(),
+      new_start_time: '10:30:00',
+      new_duration_minutes: 45,
+      reason: 'Solicitud del paciente',
+      changed_by: 2,
+      changed_by_name: 'Rosa López',
+      created_at: `${localDate()}T15:00:00Z`,
+    }])
+    renderPage()
+
+    expect(appointmentService.listAppointmentReschedules).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    expect(await screen.findByRole('region', { name: 'Historial de reprogramaciones' })).toBeInTheDocument()
+    expect(screen.getByText(/31\/08\/2026.*09:00.*60 min/)).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(`${localDate().split('-').reverse().join('/')}.*10:30.*45 min`))).toBeInTheDocument()
+    expect(screen.getByText('Solicitud del paciente')).toBeInTheDocument()
+    expect(screen.getByText(/Rosa López/)).toBeInTheDocument()
+    expect(appointmentService.listAppointmentReschedules).toHaveBeenCalledWith('access-token', 9)
+  })
+
+  it('shows the complete appointment context and opens the patient only with permission', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([appointment({
+      service: 5,
+      service_name: 'Valoración clínica',
+      consultation: 41,
+      attendance_started_at: `${localDate()}T15:05:00Z`,
+      status: 'EN_ATENCION',
+      status_display: 'En atención',
+    })])
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Detalle de cita' })
+
+    expect(within(dialog).getByText('PAC-00001')).toBeInTheDocument()
+    expect(within(dialog).getByText('Valoración clínica')).toBeInTheDocument()
+    expect(within(dialog).getByText('Consulta #41')).toBeInTheDocument()
+    expect(within(dialog).getByText(/Inicio real/)).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abrir expediente' }))
+    expect(await screen.findByText('Expediente del paciente')).toBeInTheDocument()
+  })
+
+  it('starts attendance once and navigates to the linked consultation', async () => {
+    const clinicalUser = {
+      role: 'ODONTOLOGO',
+      permissions: [
+        'appointments.view',
+        'patients.view',
+        'consultations.create',
+        'consultations.view',
+      ],
+    }
+    renderPage(clinicalUser)
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+    const startButton = screen.getByRole('button', { name: 'Iniciar atención' })
+
+    fireEvent.click(startButton)
+    fireEvent.click(startButton)
+
+    expect(await screen.findByText('Consulta clínica destino')).toBeInTheDocument()
+    expect(appointmentService.startAppointmentAttendance).toHaveBeenCalledTimes(1)
+    expect(appointmentService.startAppointmentAttendance).toHaveBeenCalledWith(
+      'access-token',
+      9,
+    )
+  })
+
+  it('continues a linked attendance and hides clinical actions without permission', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([appointment({
+      consultation: 41,
+      attendance_started_at: `${localDate()}T15:05:00Z`,
+      status: 'EN_ATENCION',
+      status_display: 'En atención',
+    })])
+    const clinicalUser = {
+      role: 'ODONTOLOGO',
+      permissions: ['appointments.view', 'consultations.view'],
+    }
+    const { unmount } = renderPage(clinicalUser)
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continuar atención' }))
+    expect(await screen.findByText('Consulta clínica destino')).toBeInTheDocument()
+
+    unmount()
+    renderPage({ role: 'RECEPCIONISTA', permissions: ['appointments.view'] })
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+    expect(screen.queryByRole('button', { name: 'Abrir expediente' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Iniciar atención' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continuar atención' })).not.toBeInTheDocument()
+  })
+
+  it('[HU-46] opens a completed linked consultation without attendance actions', async () => {
+    appointmentService.listAllAppointments.mockResolvedValue([appointment({
+      consultation: 41,
+      attendance_started_at: `${localDate()}T15:05:00Z`,
+      status: 'COMPLETADA',
+      status_display: 'Completada',
+    })])
+    renderPage({
+      role: 'ODONTOLOGO',
+      permissions: ['appointments.view', 'consultations.view'],
+    })
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    expect(screen.queryByRole('button', { name: 'Iniciar atención' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Continuar atención' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Ver consulta' }))
+
+    expect(await screen.findByText('Consulta clínica destino')).toBeInTheDocument()
+  })
+
+  it('keeps HU-28 alerts visible after agenda, start, and consultation navigation', async () => {
+    const clinicalUser = {
+      first_name: 'Elena',
+      role: 'ODONTOLOGO',
+      permissions: [
+        'appointments.view',
+        'patients.view',
+        'consultations.create',
+        'consultations.view',
+        'consultations.edit',
+      ],
+    }
+    const consultation = {
+      id: 41,
+      patient: 1,
+      professional: 3,
+      professional_name: 'Dra. Elena Vargas',
+      date: localDate(),
+      time: '09:05:00',
+      consultation_type: 'GENERAL',
+      consultation_type_display: 'Consulta general',
+      summary: 'Valoración de ortodoncia',
+      status: 'EN_PROGRESO',
+      status_display: 'En progreso',
+    }
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          ...patient,
+          clinical_record: {
+            allergies: 'Penicilina — urticaria',
+            current_medications: 'Losartán 50 mg',
+            relevant_conditions: '',
+            other_clinical_alerts: '',
+          },
+        }),
+      })
+      if (url.endsWith('/api/patients/1/consultations/41/')) return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(consultation),
+      })
+      if (url.endsWith('/api/patients/1/consultations/41/treatment-items/')) return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve([]),
+      })
+      if (url.includes('/api/clinics/services/?active=true')) return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve([]),
+      })
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderClinicalFlow(clinicalUser)
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar atención' }))
+
+    const banner = await screen.findByRole('region', { name: 'Alertas clínicas' })
+    expect(within(banner).getByText('Penicilina — urticaria')).toBeInTheDocument()
+    expect(within(banner).getByText('Losartán 50 mg')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Consulta general' })).toBeInTheDocument()
+  })
+
+  it('shows loading and a stable backend error without leaving the appointment', async () => {
+    const clinicalUser = {
+      role: 'ODONTOLOGO',
+      permissions: ['appointments.view', 'consultations.create', 'consultations.view'],
+    }
+    let rejectStart
+    appointmentService.startAppointmentAttendance.mockReturnValue(new Promise((resolve, reject) => {
+      rejectStart = reject
+    }))
+    renderPage(clinicalUser)
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar atención' }))
+
+    expect(screen.getByRole('button', { name: 'Iniciando…' })).toBeDisabled()
+    rejectStart(new Error('La cita no está en un estado que permita iniciar la atención.'))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'La cita no está en un estado que permita iniciar la atención.',
+    )
+    expect(screen.getByRole('dialog', { name: 'Detalle de cita' })).toBeInTheDocument()
+  })
+
+  it('[HU-53] explains an incomplete profile, preserves the appointment, and offers completion with both patient permissions', async () => {
+    const clinicalUser = {
+      role: 'ODONTOLOGO',
+      permissions: [
+        'appointments.view',
+        'patients.view',
+        'patients.edit',
+        'consultations.create',
+        'consultations.view',
+      ],
+    }
+    const requestError = Object.assign(new Error('Complete el perfil antes de iniciar la atención.'), {
+      data: {
+        code: 'patient_profile_incomplete',
+        detail: 'Complete el perfil antes de iniciar la atención.',
+        missing_fields: ['phone', 'guardian_name'],
+      },
+    })
+    appointmentService.startAppointmentAttendance.mockRejectedValue(requestError)
+    renderPage(clinicalUser)
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar atención' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Complete el perfil antes de iniciar la atención.')
+    expect(alert).toHaveTextContent('Teléfono')
+    expect(alert).toHaveTextContent('Nombre del responsable')
+    expect(screen.getByRole('dialog', { name: 'Detalle de cita' })).toBeInTheDocument()
+    expect(screen.getAllByText('Programada')).not.toHaveLength(0)
+    expect(screen.getByRole('button', { name: 'Iniciar atención' })).toBeEnabled()
+    expect(screen.queryByText('Consulta clínica destino')).not.toBeInTheDocument()
+    expect(appointmentService.listAllAppointments).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Completar perfil' }))
+    expect(await screen.findByText('Expediente del paciente')).toBeInTheDocument()
+  })
+
+  it('[HU-53] does not offer profile completion without patients.edit', async () => {
+    const clinicalUser = {
+      role: 'ODONTOLOGO',
+      permissions: [
+        'appointments.view',
+        'patients.view',
+        'consultations.create',
+        'consultations.view',
+      ],
+    }
+    appointmentService.startAppointmentAttendance.mockRejectedValue(Object.assign(
+      new Error('Complete el perfil antes de iniciar la atención.'),
+      {
+        data: {
+          code: 'patient_profile_incomplete',
+          detail: 'Complete el perfil antes de iniciar la atención.',
+          missing_fields: ['phone'],
+        },
+      },
+    ))
+    renderPage(clinicalUser)
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Iniciar atención' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Teléfono')
+    expect(screen.queryByRole('button', { name: 'Completar perfil' })).not.toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: 'Detalle de cita' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['CANCELADA', 'Cancelada'],
+    ['NO_ASISTIO', 'No asistió'],
+    ['COMPLETADA', 'Completada'],
+  ])('does not offer start attendance for %s', async (status, statusDisplay) => {
+    appointmentService.listAllAppointments.mockResolvedValue([
+      appointment({ status, status_display: statusDisplay }),
+    ])
+    const clinicalUser = {
+      role: 'ODONTOLOGO',
+      permissions: ['appointments.view', 'consultations.create', 'consultations.view'],
+    }
+    renderPage(clinicalUser)
+    fireEvent.click(await screen.findByRole('button', { name: /Ana Pérez, 09:00 a 10:00/ }))
+
+    expect(screen.queryByRole('button', { name: 'Iniciar atención' })).not.toBeInTheDocument()
   })
 })

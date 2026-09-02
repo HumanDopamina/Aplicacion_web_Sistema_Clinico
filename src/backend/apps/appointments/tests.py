@@ -1,5 +1,7 @@
-from datetime import date, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from unittest.mock import patch
 
+from django.test import SimpleTestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -11,10 +13,32 @@ from apps.clinics.models import (
     HolidayClosure,
     ServiceCategory,
 )
-from apps.patients.models import Patient
+from apps.audit.models import AuditEvent
+from apps.patients.models import Consultation, OdontogramVersion, Patient
 from apps.users.models import RolePermissionPreset, User
 
+from . import models as appointment_models
 from .models import Appointment
+
+
+class AppointmentRangeTests(SimpleTestCase):
+    def test_builds_a_timezone_aware_half_open_scheduled_range(self):
+        range_builder = getattr(
+            appointment_models,
+            "appointment_scheduled_range",
+            None,
+        )
+        self.assertIsNotNone(range_builder)
+
+        scheduled_range = range_builder(
+            date(2026, 8, 12),
+            time(9, 0),
+            60,
+        )
+
+        self.assertEqual(scheduled_range.lower, datetime(2026, 8, 12, 9, 0, tzinfo=UTC))
+        self.assertEqual(scheduled_range.upper, datetime(2026, 8, 12, 10, 0, tzinfo=UTC))
+        self.assertEqual(scheduled_range.bounds, "[)")
 
 
 class AppointmentApiTests(APITestCase):
@@ -50,12 +74,14 @@ class AppointmentApiTests(APITestCase):
         self.patient = self.create_patient("001-010190-0001A", "Ana")
         self.other_patient = self.create_patient("001-020290-0002B", "Luis")
 
-    def create_patient(self, national_id, first_name, **overrides):
+    def create_patient(self, identification_number, first_name, **overrides):
         values = {
             "first_name": first_name,
             "last_name": "Pérez",
             "birth_place": "Managua",
-            "national_id": national_id,
+            "identification_type": Patient.IdentificationType.CEDULA,
+            "identification_number": identification_number,
+            "phone": "+505 8000 0000",
             "gender": Patient.Gender.FEMENINO,
             "date_of_birth": date(1990, 1, 1),
             "registered_by": self.receptionist,
@@ -323,9 +349,9 @@ class AppointmentApiTests(APITestCase):
         terminal_edit = self.client.patch(detail_url, {"reason": "Cambio tardío"}, format="json")
 
         self.assertEqual(confirmed.status_code, 200)
-        self.assertEqual(completed.status_code, 200)
-        self.assertEqual(terminal_edit.status_code, 400)
-        self.assertIn("estado final", str(terminal_edit.data))
+        self.assertEqual(completed.status_code, 400)
+        self.assertEqual(terminal_edit.status_code, 200)
+        self.assertIn("acción clínica", str(completed.data))
 
     def test_invalid_transition_is_rejected_and_cancellation_reason_is_optional(self):
         scheduled = self.create_appointment()
@@ -566,3 +592,190 @@ class AppointmentApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("cerrada", str(response.data).lower())
+
+    def test_start_attendance_creates_and_links_the_clinical_context(self):
+        category = ServiceCategory.objects.create(name="Odontología general")
+        service = ClinicService.objects.create(
+            category=category,
+            name="Valoración clínica",
+            duration_minutes=60,
+            price="700.00",
+        )
+        appointment = self.create_appointment(service=service)
+        self.client.force_authenticate(self.dentist)
+        started_after = timezone.now()
+
+        response = self.client.post(
+            f"{self.list_url}{appointment.pk}/start-attendance/",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["created"])
+        appointment.refresh_from_db()
+        consultation = Consultation.objects.get(pk=appointment.consultation_id)
+        self.assertEqual(appointment.status, Appointment.Status.IN_ATTENDANCE)
+        self.assertGreaterEqual(appointment.attendance_started_at, started_after)
+        self.assertEqual(consultation.patient, self.patient)
+        self.assertEqual(consultation.professional, self.dentist)
+        self.assertEqual(consultation.status, Consultation.Status.IN_PROGRESS)
+        self.assertEqual(consultation.consultation_type, Consultation.Type.GENERAL)
+        self.assertEqual(consultation.summary, appointment.reason)
+        self.assertEqual(consultation.chief_complaint, appointment.reason)
+        self.assertEqual(consultation.dental_service, service.name)
+        local_start = timezone.localtime(appointment.attendance_started_at)
+        self.assertEqual(consultation.date, local_start.date())
+        self.assertEqual(consultation.time, local_start.time().replace(microsecond=0))
+        self.assertEqual(
+            OdontogramVersion.objects.filter(consultation=consultation).count(),
+            1,
+        )
+        self.assertEqual(response.data["appointment"]["consultation"], consultation.pk)
+        self.assertEqual(response.data["consultation"]["id"], consultation.pk)
+        detail = self.client.get(f"{self.list_url}{appointment.pk}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.data["patient"], self.patient.pk)
+        self.assertEqual(detail.data["patient_code"], self.patient.code)
+        self.assertEqual(detail.data["dentist"], self.dentist.pk)
+        self.assertEqual(detail.data["service"], service.pk)
+        self.assertEqual(detail.data["service_name"], service.name)
+        self.assertEqual(detail.data["reason"], appointment.reason)
+        self.assertEqual(detail.data["consultation"], consultation.pk)
+        self.assertIsNotNone(detail.data["attendance_started_at"])
+
+    def test_start_attendance_is_sequentially_idempotent(self):
+        appointment = self.create_appointment(status=Appointment.Status.CONFIRMED)
+        self.client.force_authenticate(self.dentist)
+        url = f"{self.list_url}{appointment.pk}/start-attendance/"
+
+        first = self.client.post(url, format="json")
+        second = self.client.post(url, format="json")
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(second.data["created"])
+        self.assertEqual(
+            first.data["consultation"]["id"],
+            second.data["consultation"]["id"],
+        )
+        self.assertEqual(Consultation.objects.count(), 1)
+        self.assertEqual(OdontogramVersion.objects.count(), 1)
+
+    def test_start_attendance_rejects_invalid_states_with_a_stable_error(self):
+        self.client.force_authenticate(self.admin)
+        for days, invalid_status in enumerate((
+            Appointment.Status.CANCELLED,
+            Appointment.Status.NO_SHOW,
+            Appointment.Status.COMPLETED,
+        )):
+            with self.subTest(status=invalid_status):
+                appointment = self.create_appointment(
+                    date=date(2026, 8, 12) + timedelta(days=days),
+                    status=invalid_status,
+                )
+                response = self.client.post(
+                    f"{self.list_url}{appointment.pk}/start-attendance/",
+                    format="json",
+                )
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(
+                    response.data["code"],
+                    "appointment_cannot_start_attendance",
+                )
+                appointment.refresh_from_db()
+                self.assertIsNone(appointment.consultation_id)
+                self.assertIsNone(appointment.attendance_started_at)
+        self.assertEqual(Consultation.objects.count(), 0)
+
+    def test_start_attendance_enforces_clinical_permission_and_appointment_scope(self):
+        appointment = self.create_appointment()
+        self.client.force_authenticate(self.receptionist)
+
+        denied = self.client.post(
+            f"{self.list_url}{appointment.pk}/start-attendance/",
+            format="json",
+        )
+
+        self.assertEqual(denied.status_code, 403)
+        self.client.force_authenticate(self.other_dentist)
+        hidden = self.client.post(
+            f"{self.list_url}{appointment.pk}/start-attendance/",
+            format="json",
+        )
+        self.assertEqual(hidden.status_code, 404)
+        self.assertEqual(Consultation.objects.count(), 0)
+
+    def test_generic_patch_cannot_enter_or_leave_the_clinical_attendance_state(self):
+        appointment = self.create_appointment()
+        self.client.force_authenticate(self.receptionist)
+        detail_url = f"{self.list_url}{appointment.pk}/"
+
+        direct_start = self.client.patch(
+            detail_url,
+            {"status": "EN_ATENCION"},
+            format="json",
+        )
+
+        self.assertEqual(direct_start.status_code, 400)
+        self.client.force_authenticate(self.admin)
+        started = self.client.post(
+            f"{detail_url}start-attendance/",
+            format="json",
+        )
+        self.assertEqual(started.status_code, 201)
+        for forbidden_status in (
+            Appointment.Status.COMPLETED,
+            Appointment.Status.CANCELLED,
+            Appointment.Status.NO_SHOW,
+        ):
+            with self.subTest(status=forbidden_status):
+                response = self.client.patch(
+                    detail_url,
+                    {"status": forbidden_status},
+                    format="json",
+                )
+                self.assertEqual(response.status_code, 400)
+
+    def test_start_attendance_records_actor_appointment_consultation_and_patient(self):
+        appointment = self.create_appointment()
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.post(
+            f"{self.list_url}{appointment.pk}/start-attendance/",
+            format="json",
+            HTTP_X_REQUEST_ID="appointment-start-audit",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        event = AuditEvent.objects.get(request_id="appointment-start-audit")
+        self.assertEqual(event.action, "APPOINTMENT_START_ATTENDANCE")
+        self.assertEqual(event.actor_id, self.dentist.pk)
+        self.assertEqual(event.resource_type, "appointment")
+        self.assertEqual(event.resource_id, str(appointment.pk))
+        self.assertEqual(event.patient_id, self.patient.pk)
+        self.assertEqual(event.metadata["appointment_id"], appointment.pk)
+        self.assertEqual(
+            event.metadata["consultation_id"],
+            response.data["consultation"]["id"],
+        )
+
+    def test_start_attendance_rolls_back_every_record_when_odontogram_creation_fails(self):
+        appointment = self.create_appointment()
+        self.client.force_authenticate(self.dentist)
+
+        with patch(
+            "apps.appointments.services.create_initial_odontogram_version",
+            side_effect=RuntimeError("synthetic odontogram failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic odontogram failure"):
+                self.client.post(
+                    f"{self.list_url}{appointment.pk}/start-attendance/",
+                    format="json",
+                )
+
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.SCHEDULED)
+        self.assertIsNone(appointment.consultation_id)
+        self.assertIsNone(appointment.attendance_started_at)
+        self.assertEqual(Consultation.objects.count(), 0)
+        self.assertEqual(OdontogramVersion.objects.count(), 0)

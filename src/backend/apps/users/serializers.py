@@ -124,6 +124,8 @@ class LoginSerializer(TokenObtainPairSerializer):
                 "first_name": user.first_name,
                 "last_name": user.last_name,
                 "phone": user.phone,
+                "specialty": user.specialty,
+                "professional_registration_number": user.professional_registration_number,
                 "avatar_url": protected_avatar_url(user, "users:current-user-avatar"),
                 "role": user.role,
                 "permissions": get_effective_permissions(user),
@@ -257,6 +259,8 @@ class CurrentUserProfileSerializer(AvatarUpdateMixin, serializers.ModelSerialize
             "first_name",
             "last_name",
             "phone",
+            "specialty",
+            "professional_registration_number",
             "avatar",
             "avatar_url",
             "remove_avatar",
@@ -264,7 +268,14 @@ class CurrentUserProfileSerializer(AvatarUpdateMixin, serializers.ModelSerialize
             "role",
             "permissions",
         )
-        read_only_fields = ("id", "role", "permissions", "avatar_url")
+        read_only_fields = (
+            "id",
+            "role",
+            "specialty",
+            "professional_registration_number",
+            "permissions",
+            "avatar_url",
+        )
         extra_kwargs = {"avatar": {"write_only": True, "required": False}}
 
     def get_permissions(self, user):
@@ -308,6 +319,8 @@ class UserAdminSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
             "first_name",
             "last_name",
             "phone",
+            "specialty",
+            "professional_registration_number",
             "avatar",
             "avatar_url",
             "remove_avatar",
@@ -372,6 +385,8 @@ class UserAdminUpdateSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
             "first_name",
             "last_name",
             "phone",
+            "specialty",
+            "professional_registration_number",
             "avatar",
             "avatar_url",
             "remove_avatar",

@@ -6,6 +6,7 @@ import {
   getConsultationOdontogram,
   getPatient,
   getPatientConsultation,
+  getPatientPlannedOdontogramOverlay,
 } from '../../services/patientService'
 import { ConsultationTabs } from './ConsultationRecordShell'
 import OdontogramChart from './OdontogramChart'
@@ -23,6 +24,7 @@ import {
   toothName,
 } from './odontogramSchema'
 import { patientIdentity, patientInitials } from './patientDisplay'
+import { buildPlannedOdontogramOverlay } from './odontogramOverlay'
 
 function CloudIcon() {
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M7 18h10a4 4 0 0 0 .7-7.94A6 6 0 0 0 6.3 8.3 4.5 4.5 0 0 0 7 18Z" /><path d="m9 13 3-3 3 3M12 10v7" /></svg>
@@ -93,6 +95,19 @@ function ToothEditor({ code, tooth, layer, canModify, onToggleWhole, onNote, onH
   </aside>
 }
 
+function PlannedTreatmentDetails({ code, items }) {
+  if (!code) return <aside className="rounded-2xl border border-dashed border-amber-300 bg-amber-50/40 p-6 text-center text-sm text-slate-600 lg:sticky lg:top-5 lg:self-start">Selecciona una pieza para ver todos sus tratamientos pendientes.</aside>
+  return <aside className="rounded-2xl border border-amber-200 bg-white p-5 shadow-sm lg:sticky lg:top-5 lg:self-start">
+    <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-amber-700">Plan estructurado vigente</p>
+    <h2 className="mt-1 font-serif text-2xl font-semibold text-slate-900">Pieza {code}</h2>
+    {items.length ? <ul className="mt-4 space-y-3">{items.map((item) => <li key={item.treatment_item_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <p className="font-semibold text-slate-900">{item.description}</p>
+      <p className="mt-1 text-xs text-slate-600">{item.status_display || item.status} · Consulta #{item.proposed_in?.id}</p>
+      <p className="mt-1 text-xs text-slate-600">{FINDING_LABELS[item.planned_finding] || item.planned_finding}{item.surfaces?.length ? ` · ${item.surfaces.map((surface) => SURFACE_LABELS[surface]).join(', ')}` : ''}</p>
+    </li>)}</ul> : <p className="mt-4 text-sm italic text-slate-500">No hay tratamientos pendientes para esta pieza.</p>}
+  </aside>
+}
+
 export default function ConsultationOdontogramPage() {
   const { patientId, consultationId } = useParams()
   const { user, accessToken } = useAuth()
@@ -109,23 +124,39 @@ export default function ConsultationOdontogramPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [conflict, setConflict] = useState(false)
+  const [plannedItems, setPlannedItems] = useState([])
+  const [plannedOverlayError, setPlannedOverlayError] = useState('')
   const canModify = user.role === 'ADMINISTRADOR' || user.permissions?.includes('consultations.edit')
 
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
+    setPlannedOverlayError('')
     try {
-      const [loadedPatient, loadedConsultation, loadedVersion] = await Promise.all([
+      const [patientResult, consultationResult, versionResult, overlayResult] = await Promise.allSettled([
         getPatient(accessToken, patientId),
         getPatientConsultation(accessToken, patientId, consultationId),
         getConsultationOdontogram(accessToken, patientId, consultationId),
+        getPatientPlannedOdontogramOverlay(accessToken, patientId),
       ])
+      const failedCore = [patientResult, consultationResult, versionResult]
+        .find((result) => result.status === 'rejected')
+      if (failedCore) throw failedCore.reason
+      const loadedPatient = patientResult.value
+      const loadedConsultation = consultationResult.value
+      const loadedVersion = versionResult.value
       const loadedChart = cloneChart(loadedVersion)
       setPatient(loadedPatient)
       setConsultation(loadedConsultation)
       setVersion(loadedVersion)
       setChart(loadedChart)
       setBaselineChart(loadedChart)
+      if (overlayResult.status === 'fulfilled') {
+        setPlannedItems(overlayResult.value)
+      } else {
+        setPlannedItems([])
+        setPlannedOverlayError(overlayResult.reason?.message || 'No fue posible cargar el plan estructurado vigente.')
+      }
       setConflict(false)
     } catch (requestError) {
       setError(requestError.message)
@@ -157,7 +188,7 @@ export default function ConsultationOdontogramPage() {
   })
 
   const toggleSurface = (code, surface) => {
-    if (!canModify || !activeFinding) return
+    if (!canModify || layer !== 'current' || !activeFinding) return
     updateTooth(code, (tooth) => {
       const findings = tooth[layer].surfaces[surface] || []
       tooth[layer].surfaces[surface] = findings.includes(activeFinding)
@@ -177,12 +208,11 @@ export default function ConsultationOdontogramPage() {
   const markHealthy = (code) => updateTooth(code, (tooth) => {
     tooth.reviewed = true
     tooth.current = { whole: [], surfaces: {} }
-    tooth.planned = { whole: [], surfaces: {} }
   })
-  const resetTooth = (code) => setChart((current) => {
-    const next = structuredClone(current)
-    delete next.teeth[code]
-    return next
+  const resetTooth = (code) => updateTooth(code, (tooth) => {
+    tooth.reviewed = true
+    tooth.note = ''
+    tooth.current = { whole: [], surfaces: {} }
   })
 
   const changeDentition = (dentition) => {
@@ -223,6 +253,10 @@ export default function ConsultationOdontogramPage() {
   }
 
   const reviewedCount = useMemo(() => Object.values(chart?.teeth || {}).filter((tooth) => tooth.reviewed).length, [chart])
+  const plannedOverlay = useMemo(
+    () => buildPlannedOdontogramOverlay(plannedItems),
+    [plannedItems],
+  )
   const totalCount = chart?.dentition === 'PRIMARY' ? 20 : chart?.dentition === 'MIXED' ? 52 : 32
 
   if (loading) return <p className="p-10 text-center text-sm text-slate-500">Cargando odontograma…</p>
@@ -241,6 +275,7 @@ export default function ConsultationOdontogramPage() {
       <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-white px-3 py-2 text-xs font-semibold text-cyan-800 shadow-sm">Versión {version.version_number}</span>{canModify ? null : <span className="rounded-full bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">Solo lectura</span>}</div>
     </div>
     {error ? <div role="alert" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"><span>{error}</span>{conflict ? <button type="button" onClick={load} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-red-700 shadow-sm">Cargar última versión</button> : null}</div> : null}
+    {plannedOverlayError ? <p role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">El estado actual sigue disponible. El plan estructurado no pudo cargarse: {plannedOverlayError}</p> : null}
 
     <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
       <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
@@ -250,15 +285,18 @@ export default function ConsultationOdontogramPage() {
           </label>
           <div><p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Progreso de evaluación</p><p className="mt-2 text-sm font-semibold text-slate-700">{reviewedCount} de {totalCount} piezas</p><div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"><span className="block h-full rounded-full bg-cyan-700" style={{ width: `${Math.min(100, reviewedCount / totalCount * 100)}%` }} /></div></div>
         </div>
-        <div className="inline-flex w-fit rounded-xl bg-slate-100 p-1" aria-label="Capa del odontograma">{[['current', 'Estado actual'], ['planned', 'Plan de tratamiento']].map(([value, label]) => <button key={value} type="button" aria-pressed={layer === value} onClick={() => { setLayer(value); setActiveFinding(SURFACE_FINDINGS[value][0]) }} className={`rounded-lg px-3 py-2 text-xs font-semibold ${layer === value ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500'}`}>{label}</button>)}</div>
+        <div className="inline-flex w-fit rounded-xl bg-slate-100 p-1" aria-label="Capa del odontograma">{[['current', 'Estado actual'], ['planned', 'Plan de tratamiento']].map(([value, label]) => <button key={value} type="button" aria-pressed={layer === value} onClick={() => { setLayer(value); setActiveFinding(value === 'current' ? SURFACE_FINDINGS.current[0] : '') }} className={`rounded-lg px-3 py-2 text-xs font-semibold ${layer === value ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500'}`}>{label}</button>)}</div>
       </div>
       <div className="mt-5 border-y border-slate-100 py-4">
-        {canModify ? <div className="mb-4 flex flex-wrap items-center gap-2"><span className="mr-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Hallazgo de superficie</span>{SURFACE_FINDINGS[layer].map((finding) => <button key={finding} type="button" aria-pressed={activeFinding === finding} onClick={() => setActiveFinding(finding)} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${activeFinding === finding ? layer === 'planned' ? 'border-amber-600 bg-amber-50 text-amber-800' : 'border-cyan-700 bg-cyan-50 text-cyan-800' : 'border-slate-200 text-slate-600 hover:border-cyan-300'}`}>{FINDING_LABELS[finding]}</button>)}</div> : null}
+        {canModify && layer === 'current' ? <div className="mb-4 flex flex-wrap items-center gap-2"><span className="mr-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Hallazgo de superficie</span>{SURFACE_FINDINGS.current.map((finding) => <button key={finding} type="button" aria-pressed={activeFinding === finding} onClick={() => setActiveFinding(finding)} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${activeFinding === finding ? 'border-cyan-700 bg-cyan-50 text-cyan-800' : 'border-slate-200 text-slate-600 hover:border-cyan-300'}`}>{FINDING_LABELS[finding]}</button>)}</div> : null}
+        {layer === 'planned' ? <p className="mb-4 text-sm text-amber-800">Esta capa se deriva de tratamientos propuestos y aceptados. La planificación manual guardada en versiones anteriores se conserva en el histórico.</p> : null}
         <FindingLegend />
       </div>
       <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
-        <OdontogramChart dentition={chart.dentition} teeth={chart.teeth} layer={layer} canModify={canModify} selectedTooth={selectedTooth} onSelectTooth={setSelectedTooth} onSurfaceClick={toggleSurface} />
-        <ToothEditor code={selectedTooth} tooth={chart.teeth[selectedTooth]} layer={layer} canModify={canModify} onToggleWhole={toggleWhole} onNote={updateNote} onHealthy={markHealthy} onReset={resetTooth} />
+        <OdontogramChart dentition={chart.dentition} teeth={layer === 'planned' ? plannedOverlay.teeth : chart.teeth} layer={layer} canModify={canModify && layer === 'current'} selectedTooth={selectedTooth} onSelectTooth={setSelectedTooth} onSurfaceClick={toggleSurface} />
+        {layer === 'planned'
+          ? <PlannedTreatmentDetails code={selectedTooth} items={plannedOverlay.detailsByTooth[selectedTooth] || []} />
+          : <ToothEditor code={selectedTooth} tooth={chart.teeth[selectedTooth]} layer={layer} canModify={canModify} onToggleWhole={toggleWhole} onNote={updateNote} onHealthy={markHealthy} onReset={resetTooth} />}
       </div>
       {canModify ? <label className="mt-5 block text-[10px] font-bold uppercase tracking-wide text-slate-400">Nota de la nueva versión
         <textarea aria-label="Nota de la versión" value={chart.note} onChange={(event) => setChart((current) => ({ ...current, note: event.target.value }))} rows="2" placeholder="Motivo o contexto de esta revisión (opcional)" className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-normal normal-case tracking-normal text-slate-700 outline-none focus:border-cyan-600 focus:bg-white focus:ring-2 focus:ring-cyan-100" />

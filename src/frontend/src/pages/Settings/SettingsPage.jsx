@@ -6,17 +6,18 @@ import AuthenticatedAvatar from '../../components/AuthenticatedAvatar'
 import RolePermissionsPanel from './RolePermissionsPanel'
 import PaginationControls from '../../components/PaginationControls'
 import { normalizePage } from '../../services/pagination'
+import { hasCapability } from '../../utils/capabilities'
 
 const ClinicProfilePanel = lazy(() => import('./ClinicProfilePanel'))
 const BusinessHoursPanel = lazy(() => import('./BusinessHoursPanel'))
 const ServicesPanel = lazy(() => import('./ServicesPanel'))
 
 const settingsSections = [
-  ['▤', 'Perfil de la clínica', 'Datos básicos y logo'],
-  ['◷', 'Horarios de atención', 'Días y horas laborales'],
-  ['✚', 'Servicios y tarifas', 'Tratamientos y precios'],
-  ['▣', 'Gestión de Staff', 'Doctores y asistentes'],
-  ['◈', 'Permisos por rol', 'Accesos por perfil'],
+  ['▤', 'Perfil de la clínica', 'Datos básicos y logo', 'clinic.manage'],
+  ['◷', 'Horarios de atención', 'Días y horas laborales', 'clinic.manage'],
+  ['✚', 'Servicios y tarifas', 'Tratamientos y precios', 'clinic.manage'],
+  ['▣', 'Gestión de Staff', 'Doctores y asistentes', 'users.manage'],
+  ['◈', 'Permisos por rol', 'Accesos por perfil', 'users.manage'],
 ]
 
 const sectionKeys = {
@@ -43,6 +44,8 @@ const emptyForm = {
   phone: '',
   email: '',
   role: 'ODONTOLOGO',
+  specialty: '',
+  professional_registration_number: '',
   password: '',
   confirm_password: '',
 }
@@ -55,6 +58,8 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
     last_name: editingUser.last_name,
     phone: editingUser.phone || '',
     role: editingUser.role,
+    specialty: editingUser.specialty || '',
+    professional_registration_number: editingUser.professional_registration_number || '',
     is_active: editingUser.is_active,
   } : emptyForm)
   const [error, setError] = useState('')
@@ -147,6 +152,19 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
     setSaving(true)
     try {
       const payload = { ...form }
+      if (
+        !payload.specialty
+        && !Object.prototype.hasOwnProperty.call(editingUser || {}, 'specialty')
+      ) delete payload.specialty
+      if (
+        !payload.professional_registration_number
+        && !Object.prototype.hasOwnProperty.call(
+          editingUser || {},
+          'professional_registration_number',
+        )
+      ) {
+        delete payload.professional_registration_number
+      }
       if (avatar) payload.avatar = avatar
       if (removeAvatar) payload.remove_avatar = true
       const saved = isEditing
@@ -201,6 +219,17 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
               <option value="ADMINISTRADOR">Administrador</option>
             </select>
           </label>
+          {form.role === 'ODONTOLOGO' ? (
+            <div className="grid gap-4 rounded-xl border border-cyan-100 bg-cyan-50/50 p-4 sm:col-span-2 sm:grid-cols-2">
+              <label className="grid gap-1.5 text-sm font-medium text-slate-700">Especialidad
+                <input maxLength="200" name="specialty" value={form.specialty || ''} onChange={update} className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+              </label>
+              <label className="grid gap-1.5 text-sm font-medium text-slate-700">Número de registro profesional
+                <input maxLength="100" name="professional_registration_number" value={form.professional_registration_number || ''} onChange={update} className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 font-normal outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+              </label>
+              <p className="text-xs leading-5 text-slate-500 sm:col-span-2">Ambos datos son opcionales y se conservan si posteriormente cambia el rol.</p>
+            </div>
+          ) : null}
           {isEditing ? (
             <>
               <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
@@ -252,7 +281,7 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
 }
 
 export default function SettingsPage() {
-  const { accessToken } = useAuth()
+  const { accessToken, user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [users, setUsers] = useState([])
   const [userCount, setUserCount] = useState(0)
@@ -261,9 +290,20 @@ export default function SettingsPage() {
   const [loadError, setLoadError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
-  const activeSection = sectionKeys[searchParams.get('seccion')] || 'Perfil de la clínica'
+  const visibleSettingsSections = settingsSections.filter(([, , , capability]) => (
+    hasCapability(user, capability)
+  ))
+  const requestedSection = sectionKeys[searchParams.get('seccion')]
+  const activeSection = visibleSettingsSections.some(([, title]) => title === requestedSection)
+    ? requestedSection
+    : visibleSettingsSections[0]?.[1]
+  const canManageUsers = hasCapability(user, 'users.manage')
 
   useEffect(() => {
+    if (!canManageUsers) {
+      setLoading(false)
+      return undefined
+    }
     let active = true
     listUsers(accessToken, page > 1 ? page : undefined)
       .then((data) => {
@@ -275,7 +315,7 @@ export default function SettingsPage() {
       .catch((error) => { if (active) setLoadError(error.message) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [accessToken, page])
+  }, [accessToken, canManageUsers, page])
 
   const saveUser = (user) => {
     setUsers((current) => editingUser
@@ -306,7 +346,7 @@ export default function SettingsPage() {
 
       <div className="mt-10 grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
         <nav aria-label="Secciones de configuración" className="flex gap-2 overflow-x-auto lg:block lg:space-y-3">
-          {settingsSections.map(([icon, title, description]) => {
+          {visibleSettingsSections.map(([icon, title, description]) => {
             const active = title === activeSection
             return (
               <button key={title} type="button" onClick={() => setSearchParams({ seccion: keysBySection[title] })} aria-current={active ? 'page' : undefined} className={`flex min-w-60 items-center gap-3 rounded-xl border p-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${active ? 'border-2 border-blue-700 bg-blue-50 text-blue-700' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>

@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -7,6 +8,165 @@ from django.test import SimpleTestCase
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+class DevelopmentDatabaseSettingsTests(SimpleTestCase):
+    def run_development(self, *args, database_url):
+        env = {
+            **os.environ,
+            "DJANGO_SETTINGS_MODULE": "config.settings.development",
+            "DATABASE_URL": database_url,
+        }
+        return subprocess.run(
+            [sys.executable, "manage.py", *args],
+            cwd=BACKEND_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_development_requires_database_url(self):
+        result = self.run_development("check", database_url="")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DATABASE_URL", result.stderr)
+
+    def test_development_rejects_a_non_postgresql_database_url(self):
+        result = self.run_development("check", database_url="sqlite:///:memory:")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PostgreSQL", result.stderr)
+
+    def test_development_parses_the_postgresql_database_url(self):
+        result = self.run_development(
+            "shell",
+            "-c",
+            (
+                "from django.conf import settings; "
+                "database = settings.DATABASES['default']; "
+                "print(database['ENGINE'], database['NAME'], database['HOST'], database['PORT'])"
+            ),
+            database_url=(
+                "postgresql://clinic:password@db.example.test:5544/clinic_development"
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "django.db.backends.postgresql clinic_development db.example.test 5544",
+            result.stdout,
+        )
+
+    def test_settings_package_alias_does_not_load_empty_settings(self):
+        env = {
+            **os.environ,
+            "DJANGO_SETTINGS_MODULE": "config.settings",
+            "DATABASE_URL": "",
+        }
+
+        result = subprocess.run(
+            [sys.executable, "manage.py", "check"],
+            cwd=BACKEND_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DATABASE_URL", result.stderr)
+
+
+class TestDatabaseSettingsTests(SimpleTestCase):
+    def test_test_profile_is_isolated_from_the_legacy_sqlite_database(self):
+        env = {
+            **os.environ,
+            "DJANGO_SETTINGS_MODULE": "config.settings.test",
+        }
+        result = subprocess.run(
+            [
+                sys.executable,
+                "manage.py",
+                "shell",
+                "-c",
+                (
+                    "from django.conf import settings; "
+                    "database = settings.DATABASES['default']; "
+                    "print(database['ENGINE'], database['NAME'], database['TEST']['NAME'])"
+                ),
+            ],
+            cwd=BACKEND_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("django.db.backends.sqlite3", result.stdout)
+        self.assertIn("test.sqlite3 :memory:", result.stdout)
+        self.assertNotIn("db.sqlite3 :memory:", result.stdout)
+
+
+class PostgresTestSettingsTests(SimpleTestCase):
+    def run_django(self, *args, test_database_url):
+        env = {
+            **os.environ,
+            "DJANGO_SETTINGS_MODULE": "config.settings.postgres_test",
+            "TEST_DATABASE_URL": test_database_url,
+        }
+        return subprocess.run(
+            [sys.executable, "manage.py", *args],
+            cwd=BACKEND_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_postgres_test_settings_require_an_explicit_url(self):
+        result = self.run_django("check", test_database_url="")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("TEST_DATABASE_URL", result.stderr)
+
+    def test_postgres_test_settings_reject_sqlite(self):
+        result = self.run_django("check", test_database_url="sqlite:///:memory:")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PostgreSQL", result.stderr)
+
+    def test_postgres_test_settings_reject_the_development_database(self):
+        result = self.run_django(
+            "check",
+            test_database_url=(
+                "postgresql://clinic_test:synthetic@db.example.test:5544/clinica_dental"
+            ),
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("clinica_dental", result.stderr)
+
+    def test_postgres_test_settings_parse_an_isolated_database(self):
+        result = self.run_django(
+            "shell",
+            "-c",
+            (
+                "from django.conf import settings; "
+                "database = settings.DATABASES['default']; "
+                "print(database['ENGINE'], database['NAME'], database['HOST'], database['PORT'])"
+            ),
+            test_database_url=(
+                "postgresql://clinic_test:synthetic@db.example.test:5544/clinic_test"
+            ),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "django.db.backends.postgresql clinic_test db.example.test 5544",
+            result.stdout,
+        )
 
 
 class ProductionSettingsTests(SimpleTestCase):
@@ -53,6 +213,81 @@ class ProductionSettingsTests(SimpleTestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("DJANGO_SECRET_KEY", result.stderr)
+
+    def test_production_settings_require_database_url_independently(self):
+        env = self.production_environment()
+        env["DATABASE_URL"] = ""
+
+        result = self.run_django("check", extra_env=env)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DATABASE_URL", result.stderr)
+
+    def test_production_settings_reject_non_postgresql_database(self):
+        env = self.production_environment()
+        env["DATABASE_URL"] = "sqlite:///runtime.sqlite3"
+
+        result = self.run_django("check", extra_env=env)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("PostgreSQL", result.stderr)
+
+    def test_production_settings_reject_wildcard_hosts(self):
+        env = self.production_environment()
+        env["ALLOWED_HOSTS"] = "*"
+
+        result = self.run_django("check", extra_env=env)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ALLOWED_HOSTS", result.stderr)
+
+    def test_production_settings_require_https_origins(self):
+        for variable in ("CSRF_TRUSTED_ORIGINS", "FRONTEND_URL", "CORS_ALLOWED_ORIGINS"):
+            with self.subTest(variable=variable):
+                env = self.production_environment()
+                env[variable] = "http://clinic.example.test"
+
+                result = self.run_django("check", extra_env=env)
+
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(variable, result.stderr)
+
+    def test_production_runtime_uses_secure_static_logging_and_cookie_settings(self):
+        result = self.run_django(
+            "shell",
+            "-c",
+            (
+                "import json; from django.conf import settings; "
+                "print(json.dumps({"
+                "'debug': settings.DEBUG, "
+                "'database': settings.DATABASES['default']['ENGINE'], "
+                "'csrf_secure': settings.CSRF_COOKIE_SECURE, "
+                "'session_secure': settings.SESSION_COOKIE_SECURE, "
+                "'refresh_secure': settings.REFRESH_COOKIE_SECURE, "
+                "'static_backend': settings.STORAGES['staticfiles']['BACKEND'], "
+                "'whitenoise_middleware': 'whitenoise.middleware.WhiteNoiseMiddleware' in settings.MIDDLEWARE, "
+                "'json_formatter': settings.LOGGING['formatters']['json']['()'], "
+                "'django_request_handlers': settings.LOGGING['loggers']['django.request']['handlers']"
+                "}))"
+            ),
+            extra_env=self.production_environment(),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = json.loads(next(
+            line for line in result.stdout.splitlines() if line.startswith("{")
+        ))
+        self.assertEqual(payload, {
+            "debug": False,
+            "database": "django.db.backends.postgresql",
+            "csrf_secure": True,
+            "session_secure": True,
+            "refresh_secure": True,
+            "static_backend": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+            "whitenoise_middleware": True,
+            "json_formatter": "config.logging.JsonLogFormatter",
+            "django_request_handlers": ["null"],
+        })
 
     def test_production_settings_pass_deploy_check_with_safe_values(self):
         result = self.run_django(

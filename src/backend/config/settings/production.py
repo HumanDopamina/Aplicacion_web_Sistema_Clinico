@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
@@ -17,25 +18,40 @@ def csv_required(name):
     return [item.strip() for item in required(name).split(",") if item.strip()]
 
 
+def https_url(name):
+    value = required(name)
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ImproperlyConfigured(f"La variable {name} debe contener una URL HTTPS.")
+    return value
+
+
+def https_origins(name, required_value=False):
+    raw_value = required(name) if required_value else os.getenv(name, "").strip()
+    origins = [item.strip() for item in raw_value.split(",") if item.strip()]
+    if any(urlparse(origin).scheme != "https" or not urlparse(origin).netloc for origin in origins):
+        raise ImproperlyConfigured(f"La variable {name} sólo admite orígenes HTTPS.")
+    return origins
+
+
 SECRET_KEY = required("DJANGO_SECRET_KEY")
 DEBUG = False
 ALLOWED_HOSTS = csv_required("ALLOWED_HOSTS")
-CSRF_TRUSTED_ORIGINS = csv_required("CSRF_TRUSTED_ORIGINS")
-FRONTEND_URL = required("FRONTEND_URL")
-CORS_ALLOWED_ORIGINS = [
-    item.strip()
-    for item in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",")
-    if item.strip()
-]
+if "*" in ALLOWED_HOSTS:
+    raise ImproperlyConfigured("ALLOWED_HOSTS no puede contener comodines en producción.")
+CSRF_TRUSTED_ORIGINS = https_origins("CSRF_TRUSTED_ORIGINS", required_value=True)
+FRONTEND_URL = https_url("FRONTEND_URL")
+CORS_ALLOWED_ORIGINS = https_origins("CORS_ALLOWED_ORIGINS")
 CORS_ALLOW_CREDENTIALS = True
 
-DATABASES = {
-    "default": dj_database_url.parse(
-        required("DATABASE_URL"),
-        conn_max_age=60,
-        conn_health_checks=True,
-    )
-}
+database = dj_database_url.parse(
+    required("DATABASE_URL"),
+    conn_max_age=60,
+    conn_health_checks=True,
+)
+if database["ENGINE"] != "django.db.backends.postgresql":
+    raise ImproperlyConfigured("DATABASE_URL debe utilizar PostgreSQL en producción.")
+DATABASES = {"default": database}
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
@@ -63,7 +79,7 @@ AWS_QUERYSTRING_EXPIRE = 60
 STORAGES = {
     "default": {"BACKEND": "config.storage.PublicMediaStorage"},
     "private": {"BACKEND": "config.storage.PrivateMediaStorage"},
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }
 PRIVATE_MEDIA_STORAGE_BACKEND = "config.storage.PrivateMediaStorage"
 PRIVATE_AVATAR_STORAGE_BACKEND = "config.storage.PrivateMediaStorage"
@@ -86,3 +102,31 @@ X_FRAME_OPTIONS = "DENY"
 REFRESH_COOKIE_SECURE = True
 ENABLE_DJANGO_ADMIN = os.getenv("ENABLE_DJANGO_ADMIN", "false").lower() == "true"
 LOGIN_TRUSTED_PROXY_IPS = csv_required("LOGIN_TRUSTED_PROXY_IPS")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "json": {"()": "config.logging.JsonLogFormatter"},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+        },
+        "null": {"class": "logging.NullHandler"},
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        "dentalclinic.request": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["null"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+}

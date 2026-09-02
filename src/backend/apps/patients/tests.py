@@ -1,9 +1,11 @@
 from unittest.mock import patch
 
 from django.apps import apps
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
+from apps.appointments.models import Appointment
 from apps.users.models import RolePermissionPreset, User
 
 from .models import Consultation, Patient
@@ -36,7 +38,8 @@ class PatientApiTests(APITestCase):
             "second_last_name": "López",
             "birth_place": "Managua",
             "address": "Colonia Roma Norte",
-            "national_id": "001-160498-0001A",
+            "identification_type": Patient.IdentificationType.CEDULA,
+            "identification_number": "001-160498-0001A",
             "phone": "+505 8888 1111",
             "email": "maria@example.com",
             "emergency_contact_name": "Carlos García",
@@ -60,6 +63,10 @@ class PatientApiTests(APITestCase):
             information_source="Paciente",
             information_reliability="Confiable",
             clinical_record={
+                "allergies": "Penicilina — urticaria",
+                "current_medications": "Losartán 50 mg",
+                "relevant_conditions": "Hipertensión controlada",
+                "other_clinical_alerts": "Antecedente de síncope durante procedimientos",
                 "examiner_name": "Dra. Elena Ruiz",
                 "examiner_national_id": "001-010180-0003C",
                 "inss_number": "INSS-9081",
@@ -122,6 +129,13 @@ class PatientApiTests(APITestCase):
         self.assertEqual(response.data["information_reliability"], "Confiable")
         record = response.data["clinical_record"]
         self.assertEqual(record["examiner_name"], "Dra. Elena Ruiz")
+        self.assertEqual(record["allergies"], "Penicilina — urticaria")
+        self.assertEqual(record["current_medications"], "Losartán 50 mg")
+        self.assertEqual(record["relevant_conditions"], "Hipertensión controlada")
+        self.assertEqual(
+            record["other_clinical_alerts"],
+            "Antecedente de síncope durante procedimientos",
+        )
         self.assertEqual(record["chief_complaint"], "Dolor en molar inferior derecho.")
         self.assertEqual(record["cardiovascular"], "Sin dolor precordial.")
         self.assertTrue(record["infectious_diseases"]["varicella"])
@@ -135,6 +149,79 @@ class PatientApiTests(APITestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.data["clinical_record"]["treatment_plan"], "Tratamiento endodóntico y corona.")
 
+    def test_hu28_updates_longitudinal_clinical_alerts(self):
+        self.client.force_authenticate(self.receptionist)
+        created = self.client.post(self.list_url, self.complete_record_payload(), format="json")
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"{self.list_url}{created.data['id']}/",
+            {
+                "clinical_record": {
+                    "allergies": "Látex — dermatitis de contacto",
+                    "current_medications": "Metformina 850 mg\nLosartán 50 mg",
+                    "relevant_conditions": "Diabetes tipo 2 controlada",
+                    "other_clinical_alerts": "Requiere citas matutinas",
+                }
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["clinical_record"]["allergies"],
+            "Látex — dermatitis de contacto",
+        )
+        self.assertEqual(
+            response.data["clinical_record"]["current_medications"],
+            "Metformina 850 mg\nLosartán 50 mg",
+        )
+        self.assertEqual(
+            response.data["clinical_record"]["relevant_conditions"],
+            "Diabetes tipo 2 controlada",
+        )
+        self.assertEqual(
+            response.data["clinical_record"]["other_clinical_alerts"],
+            "Requiere citas matutinas",
+        )
+
+    def test_hu28_patient_without_alerts_returns_empty_strings(self):
+        self.client.force_authenticate(self.receptionist)
+
+        created = self.client.post(self.list_url, self.payload(), format="json")
+        detail = self.client.get(f"{self.list_url}{created.data['id']}/")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(
+            {
+                field: detail.data["clinical_record"][field]
+                for field in (
+                    "allergies",
+                    "current_medications",
+                    "relevant_conditions",
+                    "other_clinical_alerts",
+                )
+            },
+            {
+                "allergies": "",
+                "current_medications": "",
+                "relevant_conditions": "",
+                "other_clinical_alerts": "",
+            },
+        )
+
+    def test_hu28_rejects_alert_text_longer_than_technical_limit(self):
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.post(
+            self.list_url,
+            self.payload(clinical_record={"allergies": "x" * 2001}),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("allergies", response.data["clinical_record"])
+
     def test_hu10_receptionist_registers_patient_and_can_open_created_record(self):
         self.client.force_authenticate(self.receptionist)
 
@@ -146,7 +233,8 @@ class PatientApiTests(APITestCase):
         self.assertEqual(response.data["registered_by"], self.receptionist.pk)
         detail = self.client.get(f"{self.list_url}{response.data['id']}/")
         self.assertEqual(detail.status_code, 200)
-        self.assertEqual(detail.data["national_id"], "001-160498-0001A")
+        self.assertEqual(detail.data["identification_type"], "CEDULA")
+        self.assertEqual(detail.data["identification_number"], "001-160498-0001A")
         self.assertEqual(detail.data["emergency_contact_name"], "Carlos García")
 
     def test_hu10_a_user_without_create_permission_cannot_register_patients(self):
@@ -184,7 +272,10 @@ class PatientApiTests(APITestCase):
         created = self.client.post(self.list_url, self.payload(), format="json")
         duplicate = self.client.post(
             self.list_url,
-            self.payload(national_id="001-160498-0001a", email="otra@example.com"),
+            self.payload(
+                identification_number="001-160498-0001a",
+                email="otra@example.com",
+            ),
             format="json",
         )
 
@@ -192,7 +283,7 @@ class PatientApiTests(APITestCase):
         self.assertIn("date_of_birth", future.data)
         self.assertEqual(created.status_code, 201)
         self.assertEqual(duplicate.status_code, 400)
-        self.assertIn("national_id", duplicate.data)
+        self.assertIn("identification_number", duplicate.data)
 
     def test_hu13_rejects_duplicate_national_id_with_different_separators(self):
         self.client.force_authenticate(self.receptionist)
@@ -201,7 +292,7 @@ class PatientApiTests(APITestCase):
         duplicate = self.client.post(
             self.list_url,
             self.payload(
-                national_id=" 001 160498 0001a ",
+                identification_number=" 001 160498 0001a ",
                 email="duplicado@example.com",
             ),
             format="json",
@@ -211,7 +302,11 @@ class PatientApiTests(APITestCase):
         self.assertEqual(duplicate.status_code, 400)
         self.assertEqual(
             duplicate.data,
-            {"national_id": ["Ya existe un paciente con esta cédula."]},
+            {
+                "identification_number": [
+                    "Ya existe un paciente con este tipo y número de identificación."
+                ]
+            },
         )
         self.assertEqual(Patient.objects.count(), 1)
 
@@ -221,15 +316,17 @@ class PatientApiTests(APITestCase):
 
         response = self.client.patch(
             f"{self.list_url}{created.data['id']}/",
-            {"national_id": " 001 160498 0001a "},
+            {"identification_number": " 001 160498 0001a "},
             format="json",
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["national_id"], "001 160498 0001A")
-        self.assertNotIn("national_id_key", response.data)
+        self.assertEqual(
+            response.data["identification_number"],
+            "001 160498 0001A",
+        )
         patient = Patient.objects.get(pk=created.data["id"])
-        self.assertEqual(patient.national_id_key, "0011604980001A")
+        self.assertEqual(patient.identification_number, "001 160498 0001A")
 
     def test_hu13_allows_a_genuinely_distinct_national_id(self):
         self.client.force_authenticate(self.receptionist)
@@ -237,7 +334,7 @@ class PatientApiTests(APITestCase):
         second = self.client.post(
             self.list_url,
             self.payload(
-                national_id="001-160498-0002A",
+                identification_number="001-160498-0002A",
                 email="distinto@example.com",
             ),
             format="json",
@@ -257,7 +354,7 @@ class PatientApiTests(APITestCase):
             Patient.objects.create(
                 registered_by=self.admin,
                 **self.payload(
-                    national_id="0011604980001a",
+                    identification_number="0011604980001a",
                     email="directo@example.com",
                 ),
             )
@@ -275,7 +372,7 @@ class PatientApiTests(APITestCase):
             response = self.client.post(
                 self.list_url,
                 self.payload(
-                    national_id="0011604980001a",
+                    identification_number="0011604980001a",
                     email="concurrente@example.com",
                 ),
                 format="json",
@@ -284,7 +381,11 @@ class PatientApiTests(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
             response.data,
-            {"national_id": ["Ya existe un paciente con esta cédula."]},
+            {
+                "identification_number": [
+                    "Ya existe un paciente con este tipo y número de identificación."
+                ]
+            },
         )
         self.assertEqual(Patient.objects.count(), 1)
 
@@ -310,7 +411,7 @@ class PatientApiTests(APITestCase):
                 first_name="Juan",
                 last_name="Pérez",
                 second_last_name="",
-                national_id="001-010190-0002B",
+                identification_number="001-010190-0002B",
                 phone="555-1234",
                 email="juan@example.com",
             ),
@@ -324,13 +425,98 @@ class PatientApiTests(APITestCase):
         self.assertEqual(response.data["count"], 1)
         self.assertEqual(response.data["results"][0]["full_name"], "Juan Pérez")
 
+    def test_patient_list_uses_the_minimal_administrative_summary_contract(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(
+            self.list_url,
+            self.complete_record_payload(),
+            format="json",
+        )
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        summary = response.data["results"][0]
+        self.assertEqual(summary["id"], created.data["id"])
+        self.assertEqual(set(summary), {
+            "id",
+            "code",
+            "first_name",
+            "last_name",
+            "second_last_name",
+            "full_name",
+            "phone",
+            "email",
+            "date_of_birth",
+            "is_active",
+            "profile_complete",
+            "created_at",
+        })
+        self.assertNotIn("clinical_record", summary)
+        self.assertNotIn("address", summary)
+        self.assertNotIn("emergency_contact_name", summary)
+        self.assertNotIn("identification_number", summary)
+
+    def test_patient_detail_keeps_the_complete_record_contract(self):
+        self.client.force_authenticate(self.admin)
+        created = self.client.post(
+            self.list_url,
+            self.complete_record_payload(),
+            format="json",
+        )
+
+        response = self.client.get(f"{self.list_url}{created.data['id']}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["address"], "Colonia Roma Norte")
+        self.assertEqual(response.data["identification_type"], "CEDULA")
+        self.assertEqual(response.data["identification_number"], "001-160498-0001A")
+        self.assertEqual(
+            response.data["clinical_record"]["chief_complaint"],
+            "Dolor en molar inferior derecho.",
+        )
+        self.assertEqual(
+            response.data["clinical_record"]["allergies"],
+            "Penicilina — urticaria",
+        )
+
+    def test_patient_summary_does_not_query_one_clinical_record_per_patient(self):
+        self.client.force_authenticate(self.admin)
+        self.client.post(self.list_url, self.complete_record_payload(), format="json")
+
+        with CaptureQueriesContext(connection) as first_queries:
+            first_response = self.client.get(self.list_url)
+
+        for index in range(2, 6):
+            self.client.post(
+                self.list_url,
+                self.payload(
+                    first_name=f"Paciente {index}",
+                    identification_number=f"001-010190-{index:04d}A",
+                    email=f"paciente-{index}@example.test",
+                ),
+                format="json",
+            )
+
+        with CaptureQueriesContext(connection) as many_queries:
+            many_response = self.client.get(self.list_url)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(many_response.status_code, 200)
+        self.assertEqual(len(first_queries), len(many_queries))
+        self.assertFalse(any(
+            "patients_clinicalrecord" in query["sql"].lower()
+            for query in many_queries.captured_queries
+        ))
+
     def test_patient_list_is_paginated_and_caps_the_requested_page_size(self):
         self.client.force_authenticate(self.admin)
         self.client.post(self.list_url, self.payload(), format="json")
         self.client.post(
             self.list_url,
             self.payload(
-                national_id="001-010190-0002B",
+                identification_number="001-010190-0002B",
                 email="segundo@example.com",
             ),
             format="json",
@@ -365,7 +551,7 @@ class PatientApiTests(APITestCase):
             {
                 "address": "Residencial Las Colinas",
                 "emergency_phone": "+505 7777 3333",
-                "national_id": "001-160498-0001a",
+                "identification_number": "001-160498-0001a",
                 "code": "PAC-99999",
                 "registered_by": self.receptionist.pk,
             },
@@ -375,7 +561,7 @@ class PatientApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["address"], "Residencial Las Colinas")
         self.assertEqual(response.data["emergency_phone"], "+505 7777 3333")
-        self.assertEqual(response.data["national_id"], "001-160498-0001A")
+        self.assertEqual(response.data["identification_number"], "001-160498-0001A")
         self.assertEqual(response.data["code"], "PAC-00001")
         self.assertEqual(response.data["registered_by"], self.admin.pk)
 
@@ -467,6 +653,135 @@ class PatientApiTests(APITestCase):
         self.assertEqual(results[1]["date"], "2026-08-01")
 
 
+class PatientOptionApiTests(APITestCase):
+    options_url = "/api/patients/options/"
+    list_url = "/api/patients/"
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="admin-patient-options@example.test",
+            password="SyntheticOnly123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.receptionist = User.objects.create_user(
+            email="reception-patient-options@example.test",
+            password="SyntheticOnly123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.dentist = User.objects.create_user(
+            email="dentist-patient-options@example.test",
+            password="SyntheticOnly123!",
+            role=User.Role.ODONTOLOGO,
+        )
+
+    def create_patient(self, index, **overrides):
+        values = {
+            "first_name": f"Paciente {index}",
+            "last_name": "Opciones",
+            "birth_place": "Managua",
+            "identification_type": Patient.IdentificationType.CEDULA,
+            "identification_number": f"001-010190-{index:04d}A",
+            "phone": f"+505 8800 {index:04d}",
+            "email": f"opcion-{index}@example.test",
+            "gender": Patient.Gender.OTRO,
+            "date_of_birth": "1990-01-01",
+            "registered_by": self.admin,
+        }
+        values.update(overrides)
+        return Patient.objects.create(**values)
+
+    def test_search_below_two_characters_returns_an_empty_list(self):
+        self.create_patient(1, first_name="Ana")
+        self.client.force_authenticate(self.receptionist)
+
+        empty = self.client.get(self.options_url)
+        one_character = self.client.get(self.options_url, {"search": " A "})
+
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.data, [])
+        self.assertEqual(one_character.status_code, 200)
+        self.assertEqual(one_character.data, [])
+
+    def test_options_searches_active_patients_and_returns_only_minimal_fields(self):
+        active = self.create_patient(1, first_name="María", last_name="García")
+        self.create_patient(
+            2,
+            first_name="María",
+            last_name="Inactiva",
+            is_active=False,
+        )
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.get(self.options_url, {"search": "María"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["id"], active.pk)
+        self.assertEqual(set(response.data[0]), {
+            "id",
+            "code",
+            "full_name",
+            "phone",
+            "date_of_birth",
+            "profile_complete",
+        })
+        self.assertNotIn("identification_number", response.data[0])
+        self.assertNotIn("clinical_record", response.data[0])
+
+    def test_options_searches_by_code_phone_and_existing_identification(self):
+        patient = self.create_patient(
+            7,
+            first_name="Único",
+            identification_number="001-150595-4321Z",
+            phone="+505 7777 4321",
+        )
+        self.client.force_authenticate(self.receptionist)
+
+        for search in (patient.code, "7777 4321", "150595"):
+            with self.subTest(search=search):
+                response = self.client.get(self.options_url, {"search": search})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual([item["id"] for item in response.data], [patient.pk])
+
+    def test_options_are_limited_to_twenty_results(self):
+        for index in range(1, 26):
+            self.create_patient(index, first_name=f"Coincidencia {index:02d}")
+        self.client.force_authenticate(self.receptionist)
+
+        response = self.client.get(self.options_url, {"search": "Coincidencia"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 20)
+
+    def test_appointment_creation_permission_does_not_grant_patient_record_access(self):
+        patient = self.create_patient(1, first_name="Permiso")
+        preset = RolePermissionPreset.objects.get(role=User.Role.ODONTOLOGO)
+        preset.permissions = ["appointments.create"]
+        preset.save(update_fields=["permissions"])
+        self.client.force_authenticate(self.dentist)
+
+        options = self.client.get(self.options_url, {"search": "Permiso"})
+        records = self.client.get(self.list_url)
+        detail = self.client.get(f"{self.list_url}{patient.pk}/")
+
+        self.assertEqual(options.status_code, 200)
+        self.assertEqual([item["id"] for item in options.data], [patient.pk])
+        self.assertNotIn("allergies", options.data[0])
+        self.assertNotIn("current_medications", options.data[0])
+        self.assertEqual(records.status_code, 403)
+        self.assertEqual(detail.status_code, 403)
+
+    def test_options_require_appointment_creation_permission(self):
+        self.create_patient(1, first_name="Restringido")
+
+        unauthenticated = self.client.get(self.options_url, {"search": "Restringido"})
+        self.client.force_authenticate(self.dentist)
+        unauthorized = self.client.get(self.options_url, {"search": "Restringido"})
+
+        self.assertEqual(unauthenticated.status_code, 401)
+        self.assertEqual(unauthorized.status_code, 403)
+
+
 class RecentConsultationApiTests(APITestCase):
     url = "/api/patients/consultations/recent/"
 
@@ -499,7 +814,9 @@ class RecentConsultationApiTests(APITestCase):
             first_name="María",
             last_name="García",
             birth_place="Managua",
-            national_id="001-160498-0001A",
+            identification_type=Patient.IdentificationType.CEDULA,
+            identification_number="001-160498-0001A",
+            phone="+505 8888 1111",
             gender="FEMENINO",
             date_of_birth="1998-04-16",
             registered_by=self.admin,
@@ -606,7 +923,9 @@ class PatientDashboardSummaryApiTests(APITestCase):
             first_name=first_name,
             last_name="Paciente",
             birth_place="Managua",
-            national_id=f"001-010190-{self.patient_counter:04d}A",
+            identification_type=Patient.IdentificationType.CEDULA,
+            identification_number=f"001-010190-{self.patient_counter:04d}A",
+            phone="+505 8888 1111",
             gender=Patient.Gender.FEMENINO,
             date_of_birth="1990-01-01",
             registered_by=self.admin,
@@ -764,7 +1083,9 @@ class ConsultationApiTests(APITestCase):
             first_name="María",
             last_name="García",
             birth_place="Managua",
-            national_id="001-160498-0001A",
+            identification_type=Patient.IdentificationType.CEDULA,
+            identification_number="001-160498-0001A",
+            phone="+505 8888 1111",
             gender="FEMENINO",
             date_of_birth="1998-04-16",
             registered_by=self.admin,
@@ -773,7 +1094,9 @@ class ConsultationApiTests(APITestCase):
             first_name="Juan",
             last_name="Pérez",
             birth_place="León",
-            national_id="001-010190-0002B",
+            identification_type=Patient.IdentificationType.CEDULA,
+            identification_number="001-010190-0002B",
+            phone="+505 8888 2222",
             gender="MASCULINO",
             date_of_birth="1990-01-01",
             registered_by=self.admin,
@@ -836,6 +1159,52 @@ class ConsultationApiTests(APITestCase):
         self.client.force_authenticate(self.dentist)
         return self.client.post(self.list_url, self.payload(**overrides), format="json")
 
+    def test_compact_consultation_options_are_patient_scoped_and_minimal(self):
+        first = Consultation.objects.create(
+            patient=self.patient,
+            professional=self.dentist,
+            date="2026-08-08",
+            time="09:00:00",
+            consultation_type=Consultation.Type.GENERAL,
+            summary="Privado uno",
+            status=Consultation.Status.COMPLETED,
+        )
+        second = Consultation.objects.create(
+            patient=self.patient,
+            professional=self.dentist,
+            date="2026-09-01",
+            time="10:00:00",
+            consultation_type=Consultation.Type.FOLLOW_UP,
+            summary="Privado dos",
+            status=Consultation.Status.COMPLETED,
+        )
+        Consultation.objects.create(
+            patient=self.other_patient,
+            professional=self.dentist,
+            date="2026-09-02",
+            time="11:00:00",
+            consultation_type=Consultation.Type.GENERAL,
+            summary="Paciente ajeno",
+            status=Consultation.Status.COMPLETED,
+        )
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.get(
+            self.list_url,
+            {"compact": "true", "page_size": 100},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(
+            response.data["results"],
+            [
+                {"id": second.pk, "date": "2026-09-01"},
+                {"id": first.pk, "date": "2026-08-08"},
+            ],
+        )
+        self.assertEqual(set(response.data["results"][0]), {"id", "date"})
+
     def test_creates_complete_consultation_and_assigns_authenticated_professional(self):
         response = self.create_consultation(
             professional=self.admin.pk,
@@ -853,6 +1222,15 @@ class ConsultationApiTests(APITestCase):
         self.assertEqual(response.data["blood_pressure"], "118/76")
         self.assertEqual(response.data["neurological_exam"], "Sin déficit focal.")
         self.assertEqual(response.data["treatment_plan"], "Tratamiento endodóntico y corona.")
+        self.assertFalse(
+            Appointment.objects.filter(consultation_id=response.data["id"]).exists()
+        )
+
+    def test_new_consultation_must_start_in_progress(self):
+        response = self.create_consultation(status="COMPLETADA")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Consultation.objects.count(), 0)
 
     def test_rejects_each_required_consultation_metadata_field(self):
         self.client.force_authenticate(self.dentist)
@@ -865,8 +1243,8 @@ class ConsultationApiTests(APITestCase):
                 self.assertEqual(response.status_code, 400)
                 self.assertIn(field, response.data)
 
-    def test_retrieves_and_updates_completed_consultation_with_edit_permission(self):
-        created = self.create_consultation(status="COMPLETADA")
+    def test_retrieves_and_updates_in_progress_consultation_with_edit_permission(self):
+        created = self.create_consultation()
         detail_url = f"{self.list_url}{created.data['id']}/"
 
         response = self.client.patch(
@@ -885,6 +1263,250 @@ class ConsultationApiTests(APITestCase):
         self.assertEqual(response.data["observations_analysis"], "Evolución favorable.")
         self.assertEqual(response.data["professional"], self.dentist.pk)
         self.assertEqual(response.data["patient"], self.patient.pk)
+
+    def test_generic_patch_rejects_status_transitions(self):
+        created = self.create_consultation()
+        detail_url = f"{self.list_url}{created.data['id']}/"
+
+        for status in ("COMPLETADA", "CANCELADA"):
+            with self.subTest(status=status):
+                response = self.client.patch(detail_url, {"status": status}, format="json")
+                self.assertEqual(response.status_code, 400)
+
+        consultation = Consultation.objects.get(pk=created.data["id"])
+        self.assertEqual(consultation.status, Consultation.Status.IN_PROGRESS)
+
+    def test_complete_manual_consultation_is_idempotent_and_makes_it_immutable(self):
+        created = self.create_consultation()
+        detail_url = f"{self.list_url}{created.data['id']}/"
+        complete_url = f"{detail_url}complete/"
+
+        first = self.client.post(complete_url, format="json")
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.data["consultation"]["status"], "COMPLETADA")
+        self.assertEqual(first.data["consultation"]["completed_by"], self.dentist.pk)
+        self.assertIsNotNone(first.data["consultation"]["completed_at"])
+        self.assertIsNone(first.data["appointment"])
+        completed_at = first.data["consultation"]["completed_at"]
+
+        repeated = self.client.post(complete_url, format="json")
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.data["consultation"]["completed_at"], completed_at)
+        self.assertEqual(repeated.data["consultation"]["completed_by"], self.dentist.pk)
+        self.assertEqual(Appointment.objects.count(), 0)
+
+        blocked_content = self.client.patch(
+            detail_url,
+            {"summary": "No debe cambiar"},
+            format="json",
+        )
+        blocked_status = self.client.patch(
+            detail_url,
+            {"status": "EN_PROGRESO"},
+            format="json",
+        )
+        read = self.client.get(detail_url)
+        self.assertEqual(blocked_content.status_code, 400)
+        self.assertEqual(blocked_status.status_code, 400)
+        self.assertEqual(read.status_code, 200)
+        self.assertEqual(read.data["summary"], "Valoración clínica integral.")
+
+    def test_complete_linked_consultation_completes_appointment_atomically(self):
+        appointment = Appointment.objects.create(
+            patient=self.patient,
+            dentist=self.dentist,
+            date="2026-08-08",
+            start_time="09:30:00",
+            duration_minutes=60,
+            reason="Cierre vinculado",
+            status=Appointment.Status.SCHEDULED,
+            created_by=self.admin,
+        )
+        self.client.force_authenticate(self.admin)
+        started = self.client.post(
+            f"/api/appointments/{appointment.pk}/start-attendance/",
+            format="json",
+        )
+        consultation_id = started.data["consultation"]["id"]
+
+        response = self.client.post(
+            f"{self.list_url}{consultation_id}/complete/",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["consultation"]["status"], "COMPLETADA")
+        self.assertEqual(response.data["appointment"]["id"], appointment.pk)
+        self.assertEqual(response.data["appointment"]["status"], "COMPLETADA")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.COMPLETED)
+
+    def test_complete_requires_edit_permission_and_valid_linked_state(self):
+        created = self.create_consultation()
+        complete_url = f"{self.list_url}{created.data['id']}/complete/"
+        receptionist_preset = RolePermissionPreset.objects.get(
+            role=User.Role.RECEPCIONISTA
+        )
+        receptionist_preset.permissions = ["consultations.view"]
+        receptionist_preset.save(update_fields=["permissions"])
+        self.client.force_authenticate(self.receptionist)
+
+        denied = self.client.post(complete_url, format="json")
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(
+            Consultation.objects.get(pk=created.data["id"]).status,
+            Consultation.Status.IN_PROGRESS,
+        )
+
+    def test_complete_reuses_only_the_existing_required_clinical_contract(self):
+        consultation = Consultation.objects.create(
+            patient=self.patient,
+            professional=self.dentist,
+            date="2026-08-08",
+            time=None,
+            consultation_type=Consultation.Type.GENERAL,
+            summary="Resumen existente",
+            status=Consultation.Status.IN_PROGRESS,
+        )
+        self.client.force_authenticate(self.dentist)
+
+        response = self.client.post(
+            f"{self.list_url}{consultation.pk}/complete/",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "consultation_missing_required_data")
+        consultation.refresh_from_db()
+        self.assertEqual(consultation.status, Consultation.Status.IN_PROGRESS)
+
+    def test_linked_cancelled_or_no_show_appointment_cannot_complete_consultation(self):
+        self.client.force_authenticate(self.dentist)
+        for offset, appointment_status in enumerate((
+            Appointment.Status.CANCELLED,
+            Appointment.Status.NO_SHOW,
+        )):
+            with self.subTest(status=appointment_status):
+                consultation = Consultation.objects.create(
+                    patient=self.patient,
+                    professional=self.dentist,
+                    date=f"2026-08-{20 + offset}",
+                    time="09:30:00",
+                    consultation_type=Consultation.Type.GENERAL,
+                    summary="Estado de cita no clínico",
+                    status=Consultation.Status.IN_PROGRESS,
+                )
+                appointment = Appointment.objects.create(
+                    patient=self.patient,
+                    dentist=self.dentist,
+                    date=f"2026-08-{20 + offset}",
+                    start_time="09:30:00",
+                    duration_minutes=60,
+                    reason="Estado no clínico",
+                    status=appointment_status,
+                    consultation=consultation,
+                    created_by=self.admin,
+                )
+
+                response = self.client.post(
+                    f"{self.list_url}{consultation.pk}/complete/",
+                    format="json",
+                )
+
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(
+                    response.data["code"],
+                    "appointment_cannot_be_completed_from_consultation",
+                )
+                appointment.refresh_from_db()
+                consultation.refresh_from_db()
+                self.assertEqual(appointment.status, appointment_status)
+                self.assertEqual(consultation.status, Consultation.Status.IN_PROGRESS)
+
+    def test_complete_rolls_back_when_linked_appointment_save_fails(self):
+        appointment = Appointment.objects.create(
+            patient=self.patient,
+            dentist=self.dentist,
+            date="2026-08-09",
+            start_time="09:30:00",
+            duration_minutes=60,
+            reason="Rollback de cierre",
+            status=Appointment.Status.SCHEDULED,
+            created_by=self.admin,
+        )
+        self.client.force_authenticate(self.admin)
+        started = self.client.post(
+            f"/api/appointments/{appointment.pk}/start-attendance/",
+            format="json",
+        )
+        consultation_id = started.data["consultation"]["id"]
+
+        with patch.object(Appointment, "save", side_effect=RuntimeError("synthetic sync failure")):
+            with self.assertRaisesRegex(RuntimeError, "synthetic sync failure"):
+                self.client.post(
+                    f"{self.list_url}{consultation_id}/complete/",
+                    format="json",
+                )
+
+        consultation = Consultation.objects.get(pk=consultation_id)
+        appointment.refresh_from_db()
+        self.assertEqual(consultation.status, Consultation.Status.IN_PROGRESS)
+        self.assertIsNone(consultation.completed_at)
+        self.assertIsNone(consultation.completed_by_id)
+        self.assertEqual(appointment.status, Appointment.Status.IN_ATTENDANCE)
+
+    def test_cancel_manual_consultation_is_safe_and_linked_consultation_is_rejected(self):
+        manual = self.create_consultation()
+        manual_url = f"{self.list_url}{manual.data['id']}/cancel/"
+
+        cancelled = self.client.post(manual_url, format="json")
+
+        self.assertEqual(cancelled.status_code, 200)
+        self.assertEqual(cancelled.data["consultation"]["status"], "CANCELADA")
+        self.assertIsNone(cancelled.data["appointment"])
+        repeated = self.client.post(manual_url, format="json")
+        self.assertEqual(repeated.status_code, 200)
+
+        appointment = Appointment.objects.create(
+            patient=self.patient,
+            dentist=self.dentist,
+            date="2026-08-10",
+            start_time="09:30:00",
+            duration_minutes=60,
+            reason="Cancelación vinculada",
+            status=Appointment.Status.SCHEDULED,
+            created_by=self.admin,
+        )
+        self.client.force_authenticate(self.admin)
+        started = self.client.post(
+            f"/api/appointments/{appointment.pk}/start-attendance/",
+            format="json",
+        )
+        linked_id = started.data["consultation"]["id"]
+        linked = self.client.post(
+            f"{self.list_url}{linked_id}/cancel/",
+            format="json",
+        )
+        self.assertEqual(linked.status_code, 409)
+        self.assertEqual(linked.data["code"], "consultation_linked_cancellation_unsupported")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.IN_ATTENDANCE)
+        self.assertEqual(
+            Consultation.objects.get(pk=linked_id).status,
+            Consultation.Status.IN_PROGRESS,
+        )
+
+    def test_completed_consultation_cannot_be_cancelled(self):
+        created = self.create_consultation()
+        detail_url = f"{self.list_url}{created.data['id']}/"
+        self.client.post(f"{detail_url}complete/", format="json")
+
+        response = self.client.post(f"{detail_url}cancel/", format="json")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.data["code"], "consultation_cannot_be_cancelled")
 
     def test_detail_is_scoped_to_patient_and_delete_is_not_allowed(self):
         created = self.create_consultation()

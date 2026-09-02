@@ -1,18 +1,19 @@
 import shutil
 import tempfile
-from datetime import date
+from datetime import date, time
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models.deletion import ProtectedError
 from django.test import override_settings
 from PIL import Image
 from rest_framework.test import APITestCase
 
 from apps.users.models import RolePermissionPreset, User
 
-from .models import Patient
+from .models import Consultation, Patient, PatientDocument
 
 
 def png_file(name="radiografia.png", color="white"):
@@ -64,13 +65,19 @@ class PatientDocumentApiTests(APITestCase):
         )
         self.patient = self.create_patient("001-140190-0001A", "Ana")
         self.other_patient = self.create_patient("001-150190-0002B", "Luis")
+        self.consultation = self.create_consultation(self.patient, date(2026, 9, 1))
+        self.other_consultation = self.create_consultation(
+            self.other_patient,
+            date(2026, 9, 2),
+        )
 
-    def create_patient(self, national_id, first_name, **overrides):
+    def create_patient(self, identification_number, first_name, **overrides):
         values = {
             "first_name": first_name,
             "last_name": "Pérez",
             "birth_place": "Managua",
-            "national_id": national_id,
+            "identification_type": Patient.IdentificationType.CEDULA,
+            "identification_number": identification_number,
             "gender": Patient.Gender.FEMENINO,
             "date_of_birth": date(1990, 1, 14),
             "registered_by": self.receptionist,
@@ -81,19 +88,229 @@ class PatientDocumentApiTests(APITestCase):
     def list_url(self, patient=None):
         return f"/api/patients/{(patient or self.patient).pk}/documents/"
 
+    def create_consultation(self, patient, consultation_date):
+        return Consultation.objects.create(
+            patient=patient,
+            professional=self.dentist,
+            date=consultation_date,
+            time=time(9, 0),
+            consultation_type=Consultation.Type.GENERAL,
+            summary="Resumen que no debe exponerse en documentos",
+            status=Consultation.Status.COMPLETED,
+            dental_diagnoses="Diagnóstico que no debe exponerse",
+        )
+
     def upload(self, *files, patient=None, category="Radiografía dental", **metadata):
+        payload = {
+            "files": list(files),
+            "category": category,
+            "document_date": metadata.get("document_date", "2026-08-09"),
+            "notes": metadata.get("notes", "Control radiográfico"),
+        }
+        if "consultation_id" in metadata:
+            payload["consultation_id"] = metadata["consultation_id"]
+        if "tooth_code" in metadata:
+            payload["tooth_code"] = metadata["tooth_code"]
         response = self.client.post(
             self.list_url(patient),
-            {
-                "files": list(files),
-                "category": category,
-                "document_date": metadata.get("document_date", "2026-08-09"),
-                "notes": metadata.get("notes", "Control radiográfico"),
-            },
+            payload,
             format="multipart",
         )
         self.assertEqual(response.status_code, 201, getattr(response, "data", response.content))
         return response.data
+
+    def test_optional_context_supports_patient_consultation_tooth_and_both(self):
+        self.client.force_authenticate(self.receptionist)
+        cases = (
+            ({}, None, None),
+            (
+                {"consultation_id": self.consultation.pk},
+                {"id": self.consultation.pk, "date": "2026-09-01"},
+                None,
+            ),
+            ({"tooth_code": "16"}, None, "16"),
+            (
+                {"consultation_id": self.consultation.pk, "tooth_code": "16"},
+                {"id": self.consultation.pk, "date": "2026-09-01"},
+                "16",
+            ),
+        )
+
+        for index, (metadata, expected_consultation, expected_tooth) in enumerate(cases):
+            with self.subTest(metadata=metadata):
+                created = self.upload(
+                    png_file(f"contexto-{index}.png"),
+                    category="Documento clínico",
+                    **metadata,
+                )[0]
+                self.assertEqual(created["consultation"], expected_consultation)
+                self.assertEqual(created["tooth_code"], expected_tooth)
+                if expected_consultation:
+                    self.assertEqual(set(created["consultation"]), {"id", "date"})
+
+        self.assertEqual(PatientDocument.objects.count(), 4)
+
+    def test_rejects_consultation_from_another_patient_and_invalid_fdi_tooth(self):
+        self.client.force_authenticate(self.receptionist)
+
+        wrong_consultation = self.client.post(
+            self.list_url(),
+            {
+                "files": [png_file("ajena.png")],
+                "category": "Documento clínico",
+                "consultation_id": self.other_consultation.pk,
+            },
+            format="multipart",
+        )
+        invalid_tooth = self.client.post(
+            self.list_url(),
+            {
+                "files": [png_file("pieza-invalida.png")],
+                "category": "Documento clínico",
+                "tooth_code": "19",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(wrong_consultation.status_code, 400)
+        self.assertIn("mismo paciente", str(wrong_consultation.data).lower())
+        self.assertEqual(invalid_tooth.status_code, 400)
+        self.assertIn("FDI", str(invalid_tooth.data))
+        self.assertEqual(PatientDocument.objects.count(), 0)
+
+    def test_clinical_photo_is_an_image_category_in_the_existing_repository(self):
+        self.client.force_authenticate(self.receptionist)
+        created = self.upload(
+            png_file("frontal-clinica.png"),
+            category="Fotografía clínica",
+        )[0]
+
+        listed = self.client.get(
+            self.list_url(),
+            {"category": "Fotografía clínica"},
+        )
+        content = self.client.get(created["content_url"])
+        invalid_pdf = self.client.post(
+            self.list_url(),
+            {
+                "files": [pdf_file("no-es-foto.pdf")],
+                "category": "Fotografía clínica",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.data["count"], 1)
+        self.assertEqual(listed.data["results"][0]["category"], "Fotografía clínica")
+        self.assertEqual(listed.data["results"][0]["mime_type"], "image/png")
+        self.assertEqual(content.status_code, 200)
+        self.assertEqual(content["Content-Type"], "image/png")
+        self.assertEqual(invalid_pdf.status_code, 400)
+        self.assertIn("imagen", str(invalid_pdf.data).lower())
+        content.close()
+
+    def test_filters_by_consultation_and_keeps_patient_only_documents_visible(self):
+        self.client.force_authenticate(self.receptionist)
+        self.upload(png_file("general.png"), category="Documento clínico")
+        self.upload(
+            png_file("consulta.png"),
+            category="Documento clínico",
+            consultation_id=self.consultation.pk,
+        )
+
+        all_documents = self.client.get(self.list_url())
+        filtered = self.client.get(
+            self.list_url(),
+            {"consultation_id": self.consultation.pk},
+        )
+
+        self.assertEqual(all_documents.data["count"], 2)
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(filtered.data["count"], 1)
+        self.assertEqual(filtered.data["results"][0]["original_name"], "consulta.png")
+
+    def test_updates_context_on_existing_url_and_keeps_inactive_patient_read_only(self):
+        self.client.force_authenticate(self.receptionist)
+        created = self.upload(png_file("editable.png"), category="Documento clínico")[0]
+        detail_url = f"{self.list_url()}{created['id']}/"
+
+        updated = self.client.patch(
+            detail_url,
+            {
+                "category": "Fotografía clínica",
+                "consultation_id": self.consultation.pk,
+                "tooth_code": "16",
+            },
+            format="json",
+        )
+
+        self.assertEqual(updated.status_code, 200, getattr(updated, "data", None))
+        self.assertEqual(updated.data["category"], "Fotografía clínica")
+        self.assertEqual(
+            updated.data["consultation"],
+            {"id": self.consultation.pk, "date": "2026-09-01"},
+        )
+        self.assertEqual(updated.data["tooth_code"], "16")
+
+        self.patient.is_active = False
+        self.patient.save(update_fields=("is_active",))
+        blocked = self.client.patch(
+            detail_url,
+            {"consultation_id": None, "tooth_code": None},
+            format="json",
+        )
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("inactivo", str(blocked.data).lower())
+
+    def test_context_requires_consultation_permission_and_is_hidden_without_it(self):
+        self.client.force_authenticate(self.admin)
+        created = self.upload(
+            png_file("privado.png"),
+            category="Documento clínico",
+            consultation_id=self.consultation.pk,
+            tooth_code="16",
+        )[0]
+        preset = RolePermissionPreset.objects.get(role=User.Role.RECEPCIONISTA)
+        preset.permissions = [
+            code for code in preset.permissions if code != "consultations.view"
+        ]
+        preset.save(update_fields=("permissions",))
+        self.client.force_authenticate(self.receptionist)
+
+        listed = self.client.get(self.list_url())
+        filtered = self.client.get(
+            self.list_url(),
+            {"consultation_id": self.consultation.pk},
+        )
+        attempted_update = self.client.patch(
+            f"{self.list_url()}{created['id']}/",
+            {"consultation_id": self.consultation.pk},
+            format="json",
+        )
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertIsNone(listed.data["results"][0]["consultation"])
+        self.assertIsNone(listed.data["results"][0]["tooth_code"])
+        self.assertEqual(filtered.status_code, 403)
+        self.assertEqual(attempted_update.status_code, 403)
+
+    def test_linked_consultation_is_protected_from_deletion(self):
+        document = PatientDocument.objects.create(
+            patient=self.patient,
+            consultation=self.consultation,
+            original_name="contexto.pdf",
+            category="Informe",
+            document_date=date(2026, 9, 1),
+            mime_type="application/pdf",
+            size_bytes=42,
+            file=pdf_file("contexto.pdf"),
+            uploaded_by=self.dentist,
+        )
+
+        with self.assertRaises(ProtectedError):
+            self.consultation.delete()
+
+        self.assertTrue(PatientDocument.objects.filter(pk=document.pk).exists())
 
     def test_default_roles_view_and_create_but_delete_is_not_assigned(self):
         self.client.force_authenticate(self.receptionist)

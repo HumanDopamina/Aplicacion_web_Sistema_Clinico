@@ -251,17 +251,46 @@ class IsAdministrator(BasePermission):
         )
 
 
+AUDITABLE_STAFF_FIELDS = {
+    "avatar",
+    "email",
+    "first_name",
+    "is_active",
+    "last_name",
+    "phone",
+    "professional_registration_number",
+    "remove_avatar",
+    "role",
+    "specialty",
+}
+
+
+def set_staff_audit_fields(request, validated_data):
+    raw_request = getattr(request, "_request", request)
+    raw_request.audit_changed_fields = sorted(
+        field for field in validated_data if field in AUDITABLE_STAFF_FIELDS
+    )
+
+
 class UserCollectionView(generics.ListCreateAPIView):
     permission_classes = [IsAuthenticated, IsAdministrator]
     serializer_class = UserAdminSerializer
     queryset = User.objects.order_by("first_name", "email")
     pagination_class = StandardPageNumberPagination
 
+    def perform_create(self, serializer):
+        set_staff_audit_fields(self.request, serializer.validated_data)
+        serializer.save()
+
 
 class UserDetailView(generics.UpdateAPIView):
     permission_classes = [IsAuthenticated, IsAdministrator]
     serializer_class = UserAdminUpdateSerializer
     queryset = User.objects.all()
+
+    def perform_update(self, serializer):
+        set_staff_audit_fields(self.request, serializer.validated_data)
+        serializer.save()
 
 
 class RolePermissionPresetCollectionView(APIView):

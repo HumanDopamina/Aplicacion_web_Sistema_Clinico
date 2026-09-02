@@ -34,6 +34,7 @@ IMAGE_FORMATS = {
     "image/png": {"PNG"},
     "image/webp": {"WEBP"},
 }
+CLINICAL_PHOTO_CATEGORY = "Fotografía clínica"
 
 
 @deconstructible
@@ -57,6 +58,10 @@ def patient_document_path(instance, filename):
 
 def normalize_category(value):
     return re.sub(r"\s+", " ", value).strip()
+
+
+def is_clinical_photo_category(value):
+    return normalize_category(value).casefold() == CLINICAL_PHOTO_CATEGORY.casefold()
 
 
 def safe_original_name(value):

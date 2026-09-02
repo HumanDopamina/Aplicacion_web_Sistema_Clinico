@@ -7,6 +7,8 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
     defaults:
       run:
         working-directory: src/backend
@@ -16,8 +18,12 @@ jobs:
         with:
           python-version: '3.13'
           cache: pip
-          cache-dependency-path: src/backend/requirements.txt
-      - run: python -m pip install -r requirements.txt
+          cache-dependency-path: |
+            src/backend/requirements.lock
+            src/backend/requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pip check
+      - run: python -m pip_audit -r requirements.lock
       - run: python manage.py makemigrations --check --dry-run
       - run: python manage.py migrate --plan
       - run: python manage.py migrate --noinput
@@ -45,6 +51,43 @@ jobs:
           LOGIN_TRUSTED_PROXY_IPS: 10.0.0.10
         run: python manage.py check --deploy
 
+  backend-postgres-appointments:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: clinic_test
+          POSTGRES_USER: clinic_test
+          POSTGRES_PASSWORD: clinic-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clinic_test -d clinic_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.postgres_test
+      TEST_DATABASE_URL: postgresql://clinic_test:clinic-test-only@127.0.0.1:5432/clinic_test
+    defaults:
+      run:
+        working-directory: src/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: src/backend/requirements.lock
+      - run: python -m pip install -r requirements.lock
+      - run: python manage.py check
+      - run: python manage.py makemigrations --check --dry-run
+      - run: python manage.py migrate --plan
+      - run: python manage.py migrate --noinput
+      - run: python manage.py migrate --check
+      - run: python manage.py test apps.appointments apps.patients.test_postgres --noinput
+
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -61,3 +104,12 @@ jobs:
       - run: npm test
       - run: npm run lint
       - run: npm run build
+        env:
+          VITE_API_URL: https://api.example.test
+
+  backend-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build non-root production backend image
+        run: docker build --tag dentalclinic-backend:ci src/backend

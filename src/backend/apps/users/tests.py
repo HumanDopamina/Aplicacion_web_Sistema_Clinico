@@ -77,6 +77,8 @@ class LoginApiTests(APITestCase):
                 "documents.view",
                 "documents.create",
                 "documents.delete",
+                "clinic.manage",
+                "users.manage",
             ],
         )
         self.assertNotIn("password", response.data["user"])
@@ -1215,6 +1217,35 @@ class RolePermissionPresetApiTests(APITestCase):
             {preset["role"] for preset in response.data["presets"]},
             {User.Role.RECEPCIONISTA, User.Role.ODONTOLOGO},
         )
+
+    def test_hu01_administrative_capabilities_are_effective_but_not_delegable(self):
+        self.client.force_authenticate(self.admin)
+
+        profile = self.client.get(reverse("users:current-user"))
+        catalog = self.client.get(self.list_url)
+        delegated = self.client.patch(
+            f"{self.list_url}{User.Role.RECEPCIONISTA}/",
+            {"permissions": ["clinic.manage", "users.manage"]},
+            format="json",
+        )
+
+        self.assertEqual(profile.status_code, 200)
+        self.assertIn("clinic.manage", profile.data["permissions"])
+        self.assertIn("users.manage", profile.data["permissions"])
+        self.assertNotIn(
+            "clinic.manage",
+            [item["code"] for item in catalog.data["available_permissions"]],
+        )
+        self.assertNotIn(
+            "users.manage",
+            [item["code"] for item in catalog.data["available_permissions"]],
+        )
+        self.assertEqual(delegated.status_code, 400)
+
+        self.client.force_authenticate(self.receptionist)
+        operational_profile = self.client.get(reverse("users:current-user"))
+        self.assertNotIn("clinic.manage", operational_profile.data["permissions"])
+        self.assertNotIn("users.manage", operational_profile.data["permissions"])
 
     def test_hu09_administrator_replaces_a_role_permission_preset(self):
         self.client.force_authenticate(self.admin)

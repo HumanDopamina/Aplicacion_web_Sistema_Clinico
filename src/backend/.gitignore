@@ -11,10 +11,12 @@ __pycache__/
 
 # Base de datos local de Django
 db.sqlite3
+test.sqlite3
 
 # Archivos multimedia subidos por usuarios
 media/
 private_media/
+staticfiles/
 
 # Variables de entorno y configuración sensible
 .env

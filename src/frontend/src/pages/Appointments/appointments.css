@@ -40,6 +40,7 @@
 .appointment-card.compact small { display: none; }
 .appointment-status { position: absolute; top: 7px; right: 7px; border-radius: 999px; padding: 2px 5px; font-size: 8px; font-weight: 800; }
 .appointment-card.status-confirmada { border-color: #a7f3d0; border-left-color: #047857; background: #ecfdf5; }
+.appointment-card.status-presente { border-color: #ddd6fe; border-left-color: #7c3aed; background: #f5f3ff; }
 .appointment-card.status-cancelada { border-color: #fecaca; border-left-color: #b91c1c; background: #fef2f2; opacity: .78; }
 .appointment-card.status-no_asistio { border-color: #fde68a; border-left-color: #b45309; background: #fffbeb; }
 .appointment-card.status-completada { border-color: #cbd5e1; border-left-color: #64748b; background: #f8fafc; }

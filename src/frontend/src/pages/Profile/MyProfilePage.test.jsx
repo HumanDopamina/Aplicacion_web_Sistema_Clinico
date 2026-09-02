@@ -17,6 +17,8 @@ const profile = {
   first_name: 'Elena',
   last_name: 'Vargas',
   phone: '+505 8888 1111',
+  specialty: 'Endodoncia',
+  professional_registration_number: 'REG-2048',
   role: 'ODONTOLOGO',
   permissions: ['patients.view'],
   avatar_url: '',
@@ -53,6 +55,9 @@ describe('MyProfilePage', () => {
     expect(screen.getByDisplayValue('Elena')).toBeInTheDocument()
     expect(screen.getByDisplayValue('Vargas')).toBeInTheDocument()
     expect(screen.getByText('Odontólogo')).toBeInTheDocument()
+    expect(screen.getByText('Endodoncia')).toBeInTheDocument()
+    expect(screen.getByText('REG-2048')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Especialidad')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('Contraseña actual')).not.toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('Correo electrónico'), {

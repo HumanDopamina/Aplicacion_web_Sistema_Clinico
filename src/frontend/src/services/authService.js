@@ -16,11 +16,13 @@ export const logout = ({ access }) => csrfRequest('/api/auth/logout/', {
 
 export async function restoreSession() {
   const access = await refreshAccessToken()
-  const user = await apiRequest('/api/auth/me/', {
-    headers: { Authorization: `Bearer ${access}` },
-  })
+  const user = await getCurrentSessionUser(access)
   return { access, user }
 }
+
+export const getCurrentSessionUser = (access) => apiRequest('/api/auth/me/', {
+  headers: { Authorization: `Bearer ${access}` },
+})
 
 export const requestPasswordReset = ({ email }) => apiRequest('/api/auth/password-reset/', {
   method: 'POST',

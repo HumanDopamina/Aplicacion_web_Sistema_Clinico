@@ -1,8 +1,23 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+export function resolveApiUrl({ configured, isDevelopment, location }) {
+  const explicitUrl = configured?.trim().replace(/\/+$/, '')
+  if (explicitUrl) return explicitUrl
+  if (!isDevelopment) {
+    throw new Error('VITE_API_URL es obligatoria para el build de producción.')
+  }
+  if (!location) return 'http://127.0.0.1:8000'
+  return `${location.protocol}//${location.hostname}:8000`
+}
+
+const API_URL = resolveApiUrl({
+  configured: import.meta.env.VITE_API_URL,
+  isDevelopment: import.meta.env.DEV,
+  location: typeof window === 'undefined' ? null : window.location,
+})
 
 let accessToken = null
 let refreshPromise = null
 let sessionExpiredHandler = null
+let forbiddenHandler = null
 let sessionGeneration = 0
 
 export function setAccessToken(token) {
@@ -17,6 +32,10 @@ export function clearAccessToken() {
 
 export function setSessionExpiredHandler(handler) {
   sessionExpiredHandler = handler
+}
+
+export function setForbiddenHandler(handler) {
+  forbiddenHandler = handler
 }
 
 function firstError(value) {
@@ -87,6 +106,13 @@ async function authenticatedResponse(path, options = {}) {
       headers: { ...options.headers, Authorization: `Bearer ${renewedAccess}` },
     })
   }
+  if (response.status === 403 && isProtected && forbiddenHandler) {
+    try {
+      Promise.resolve(forbiddenHandler()).catch(() => {})
+    } catch {
+      // El error original de autorización conserva prioridad para el consumidor.
+    }
+  }
   return response
 }
 
@@ -112,6 +138,40 @@ export async function apiBlobRequest(path, options = {}) {
     throw error
   }
   return response.blob()
+}
+
+function fileResponseName(response) {
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
+  const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+  let filename = ''
+  try {
+    filename = encoded ? decodeURIComponent(encoded.replace(/^"|"$/g, '')) : (plain || '')
+  } catch {
+    filename = plain || ''
+  }
+  return Array.from(filename.split(/[\\/]/).pop())
+    .filter((character) => {
+      const code = character.charCodeAt(0)
+      return code >= 32 && code !== 127
+    })
+    .join('')
+    .trim()
+}
+
+export async function apiFileRequest(path, options = {}) {
+  const response = await authenticatedResponse(path, options)
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    const error = new Error(errorMessage(data))
+    error.status = response.status
+    error.data = data
+    throw error
+  }
+  return {
+    blob: await response.blob(),
+    filename: fileResponseName(response),
+  }
 }
 
 export async function refreshAccessToken() {

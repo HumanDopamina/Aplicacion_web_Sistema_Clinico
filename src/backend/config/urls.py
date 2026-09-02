@@ -19,12 +19,16 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from . import health
+
 urlpatterns = [
-    path('api/auth/', include('apps.users.urls')),
-    path('api/patients/', include('apps.patients.urls')),
-    path('api/appointments/', include('apps.appointments.urls')),
-    path('api/clinics/', include('apps.clinics.urls')),
-    path('api/audit/', include('apps.audit.urls')),
+    path('health/live/', health.live, name='health-live'),
+    path('health/ready/', health.ready, name='health-ready'),
+    path('api/auth/', include('apps.users.urls', namespace='users')),
+    path('api/patients/', include('apps.patients.urls', namespace='patients')),
+    path('api/appointments/', include('apps.appointments.urls', namespace='appointments')),
+    path('api/clinics/', include('apps.clinics.urls', namespace='clinics')),
+    path('api/audit/', include('apps.audit.urls', namespace='audit')),
 ]
 
 if settings.ENABLE_DJANGO_ADMIN:

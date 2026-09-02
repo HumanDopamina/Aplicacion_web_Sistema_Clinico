@@ -27,6 +27,10 @@ PERMISSION_CATALOG = (
 )
 
 PERMISSION_CODES = tuple(item["code"] for item in PERMISSION_CATALOG)
+ADMINISTRATIVE_PERMISSION_CODES = (
+    "clinic.manage",
+    "users.manage",
+)
 EDITABLE_ROLES = ("RECEPCIONISTA", "ODONTOLOGO")
 DEFAULT_ROLE_PERMISSIONS = {
     "RECEPCIONISTA": [
@@ -60,7 +64,7 @@ def order_permissions(permissions):
 
 def get_effective_permissions(user):
     if user.role == "ADMINISTRADOR":
-        return list(PERMISSION_CODES)
+        return list(PERMISSION_CODES + ADMINISTRATIVE_PERMISSION_CODES)
 
     from .models import RolePermissionPreset
 

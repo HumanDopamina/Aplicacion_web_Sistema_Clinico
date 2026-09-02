@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { deletePatientDocument, getPatientDocumentContent, uploadPatientDocuments } from '../../services/patientService'
+import { deletePatientDocument, getPatientDocumentContent, updatePatientDocument, uploadPatientDocuments } from '../../services/patientService'
 import { todayValue } from '../Appointments/appointmentDisplay'
 import { formatDocumentDate, formatDocumentSize } from './patientDocumentDisplay'
 
@@ -34,12 +34,14 @@ function validationMessage(files) {
   return ''
 }
 
-export function DocumentUploadDialog({ accessToken, categories, patientId, timeZone, onClose, onUploaded }) {
+export function DocumentUploadDialog({ accessToken, canUseClinicalContext, categories, consultations, patientId, timeZone, onClose, onUploaded }) {
   const closeRef = useRef(null)
   const [files, setFiles] = useState([])
   const [category, setCategory] = useState('')
   const [documentDate, setDocumentDate] = useState(() => todayValue(timeZone))
   const [notes, setNotes] = useState('')
+  const [consultationId, setConsultationId] = useState('')
+  const [toothCode, setToothCode] = useState('')
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -64,7 +66,7 @@ export function DocumentUploadDialog({ accessToken, categories, patientId, timeZ
     setError('')
     try {
       await uploadPatientDocuments(accessToken, patientId, {
-        files, category, documentDate, notes,
+        files, category, documentDate, notes, consultationId, toothCode,
       })
       await onUploaded()
       onClose()
@@ -94,6 +96,10 @@ export function DocumentUploadDialog({ accessToken, categories, patientId, timeZ
           <label className="grid gap-1.5 text-sm font-semibold text-slate-700">Categoría<input required list="document-category-suggestions" value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-xl border border-slate-200 px-3.5 py-3 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" placeholder="Ej. Radiografía" /><datalist id="document-category-suggestions">{categories.map((item) => <option key={item} value={item} />)}</datalist></label>
           <label className="grid gap-1.5 text-sm font-semibold text-slate-700">Fecha del documento<input required type="date" value={documentDate} onChange={(event) => setDocumentDate(event.target.value)} className="rounded-xl border border-slate-200 px-3.5 py-3 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /></label>
         </div>
+        {canUseClinicalContext ? <div className="grid gap-4 sm:grid-cols-2">
+          <label className="grid gap-1.5 text-sm font-semibold text-slate-700">Consulta relacionada <span className="font-normal text-slate-400">(opcional)</span><select aria-label="Consulta relacionada" value={consultationId} onChange={(event) => setConsultationId(event.target.value)} className="rounded-xl border border-slate-200 px-3.5 py-3 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"><option value="">Solo paciente</option>{consultations.map((item) => <option key={item.id} value={item.id}>{formatDocumentDate(item.date)}</option>)}</select></label>
+          <label className="grid gap-1.5 text-sm font-semibold text-slate-700">Pieza dental FDI <span className="font-normal text-slate-400">(opcional)</span><input aria-label="Pieza dental FDI" inputMode="numeric" maxLength="2" value={toothCode} onChange={(event) => setToothCode(event.target.value)} placeholder="Ej. 16" className="rounded-xl border border-slate-200 px-3.5 py-3 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" /></label>
+        </div> : null}
         <label className="grid gap-1.5 text-sm font-semibold text-slate-700">Notas <span className="font-normal text-slate-400">(opcional)</span><textarea rows="3" maxLength="2000" value={notes} onChange={(event) => setNotes(event.target.value)} className="resize-y rounded-xl border border-slate-200 px-3.5 py-3 font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" placeholder="Contexto clínico del lote" /></label>
       </div>
       <footer className="sticky bottom-0 flex flex-col-reverse gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:justify-end sm:px-7"><button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancelar</button><button disabled={saving} className="rounded-xl bg-blue-700 px-5 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:cursor-wait disabled:opacity-60">{saving ? 'Guardando…' : 'Guardar documentos'}</button></footer>
@@ -101,13 +107,18 @@ export function DocumentUploadDialog({ accessToken, categories, patientId, timeZ
   </div>
 }
 
-export function DocumentDetailDialog({ accessToken, document, patientActive, canDelete, patientId, onClose, onDeleted }) {
+export function DocumentDetailDialog({ accessToken, canEdit, canUseClinicalContext, categories, consultations, document, patientActive, canDelete, patientId, onClose, onDeleted, onUpdated }) {
   const closeRef = useRef(null)
   const [objectUrl, setObjectUrl] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [category, setCategory] = useState(document.category)
+  const [consultationId, setConsultationId] = useState(document.consultation?.id ? String(document.consultation.id) : '')
+  const [toothCode, setToothCode] = useState(document.tooth_code || '')
   useModalBehavior(onClose, closeRef)
 
   useEffect(() => {
@@ -154,6 +165,25 @@ export function DocumentDetailDialog({ accessToken, document, patientActive, can
     }
   }
 
+  const saveMetadata = async (event) => {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const updated = await updatePatientDocument(accessToken, patientId, document.id, {
+        category,
+        consultation_id: consultationId ? Number(consultationId) : null,
+        tooth_code: toothCode.trim() || null,
+      })
+      await onUpdated(updated)
+      setEditing(false)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-0 backdrop-blur-[2px] sm:p-5">
     <section role="dialog" aria-modal="true" aria-label="Detalle del documento" className="flex h-full w-full flex-col overflow-hidden bg-white shadow-2xl sm:max-h-[calc(100dvh-2.5rem)] sm:max-w-5xl sm:rounded-3xl lg:flex-row">
       <div className="flex min-h-[38vh] flex-1 items-center justify-center bg-slate-900 p-4 sm:min-h-[48vh] lg:min-h-0">
@@ -164,9 +194,9 @@ export function DocumentDetailDialog({ accessToken, document, patientActive, can
       </div>
       <aside className="w-full overflow-y-auto border-l border-slate-200 p-5 sm:p-7 lg:max-w-sm">
         <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-blue-700">Detalle del documento</p><h2 className="mt-1 break-words font-serif text-2xl font-semibold text-slate-950">{document.original_name}</h2></div><CloseButton buttonRef={closeRef} onClick={onClose} /></div>
-        <dl className="mt-7 grid grid-cols-2 gap-x-4 gap-y-5 text-sm"><div><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Categoría</dt><dd className="mt-1 font-medium text-slate-800">{document.category}</dd></div><div><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Fecha</dt><dd className="mt-1 font-medium text-slate-800">{formatDocumentDate(document.document_date)}</dd></div><div><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Tipo</dt><dd className="mt-1 font-medium text-slate-800">{document.mime_type === 'application/pdf' ? 'PDF' : 'Imagen'}</dd></div><div><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Tamaño</dt><dd className="mt-1 font-medium text-slate-800">{formatDocumentSize(document.size_bytes)}</dd></div><div className="col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Adjuntado por</dt><dd className="mt-1 font-medium text-slate-800">{document.uploaded_by_name}</dd></div><div className="col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Notas</dt><dd className="mt-1 leading-6 text-slate-600">{document.notes || 'Sin notas adicionales.'}</dd></div></dl>
+        {editing ? <form onSubmit={saveMetadata} className="mt-7 space-y-4 rounded-2xl border border-blue-100 bg-blue-50/50 p-4"><label className="grid gap-1.5 text-sm font-semibold text-slate-700">Categoría<input required list="document-edit-category-suggestions" value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal" /><datalist id="document-edit-category-suggestions">{categories.map((item) => <option key={item} value={item} />)}</datalist></label>{canUseClinicalContext ? <><label className="grid gap-1.5 text-sm font-semibold text-slate-700">Consulta relacionada<select aria-label="Consulta relacionada" value={consultationId} onChange={(event) => setConsultationId(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal"><option value="">Solo paciente</option>{consultations.map((item) => <option key={item.id} value={item.id}>{formatDocumentDate(item.date)}</option>)}</select></label><label className="grid gap-1.5 text-sm font-semibold text-slate-700">Pieza dental FDI<input aria-label="Pieza dental FDI" inputMode="numeric" maxLength="2" value={toothCode} onChange={(event) => setToothCode(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 font-normal" /></label></> : null}<div className="flex gap-2"><button type="button" onClick={() => setEditing(false)} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700">Cancelar</button><button disabled={saving} className="rounded-lg bg-blue-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">{saving ? 'Guardando…' : 'Guardar metadatos'}</button></div></form> : <dl className="mt-7 grid grid-cols-2 gap-x-4 gap-y-5 text-sm"><div><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Categoría</dt><dd className="mt-1 font-medium text-slate-800">{document.category}</dd></div><div><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Fecha</dt><dd className="mt-1 font-medium text-slate-800">{formatDocumentDate(document.document_date)}</dd></div><div><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Tipo</dt><dd className="mt-1 font-medium text-slate-800">{document.mime_type === 'application/pdf' ? 'PDF' : 'Imagen'}</dd></div><div><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Tamaño</dt><dd className="mt-1 font-medium text-slate-800">{formatDocumentSize(document.size_bytes)}</dd></div>{canUseClinicalContext && document.consultation ? <div className="col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Consulta</dt><dd className="mt-1 font-medium text-slate-800">Consulta · {formatDocumentDate(document.consultation.date)}</dd></div> : null}{canUseClinicalContext && document.tooth_code ? <div className="col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Pieza dental</dt><dd className="mt-1 font-medium text-slate-800">Pieza {document.tooth_code}</dd></div> : null}<div className="col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Adjuntado por</dt><dd className="mt-1 font-medium text-slate-800">{document.uploaded_by_name}</dd></div><div className="col-span-2"><dt className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Notas</dt><dd className="mt-1 leading-6 text-slate-600">{document.notes || 'Sin notas adicionales.'}</dd></div></dl>}
         {error && objectUrl ? <p role="alert" className="mt-5 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p> : null}
-        {confirming ? <div className="mt-7 rounded-2xl border border-red-200 bg-red-50 p-4"><h3 className="font-semibold text-red-900">¿Eliminar definitivamente?</h3><p className="mt-1 text-sm leading-5 text-red-700">El archivo se borrará físicamente y no podrá recuperarse.</p><div className="mt-4 flex gap-2"><button type="button" onClick={() => setConfirming(false)} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">Conservar</button><button type="button" disabled={deleting} onClick={remove} className="rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">{deleting ? 'Eliminando…' : 'Sí, eliminar'}</button></div></div> : <div className="mt-8 flex flex-wrap gap-2 border-t border-slate-200 pt-5"><button type="button" onClick={download} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">Descargar</button>{canDelete && patientActive ? <button type="button" onClick={() => setConfirming(true)} className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50">Eliminar documento</button> : null}</div>}
+        {confirming ? <div className="mt-7 rounded-2xl border border-red-200 bg-red-50 p-4"><h3 className="font-semibold text-red-900">¿Eliminar definitivamente?</h3><p className="mt-1 text-sm leading-5 text-red-700">El archivo se borrará físicamente y no podrá recuperarse.</p><div className="mt-4 flex gap-2"><button type="button" onClick={() => setConfirming(false)} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">Conservar</button><button type="button" disabled={deleting} onClick={remove} className="rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">{deleting ? 'Eliminando…' : 'Sí, eliminar'}</button></div></div> : <div className="mt-8 flex flex-wrap gap-2 border-t border-slate-200 pt-5"><button type="button" onClick={download} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">Descargar</button>{canEdit && !editing ? <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-blue-200 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-50">Editar metadatos</button> : null}{canDelete && patientActive ? <button type="button" onClick={() => setConfirming(true)} className="rounded-xl border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-50">Eliminar documento</button> : null}</div>}
       </aside>
     </section>
   </div>

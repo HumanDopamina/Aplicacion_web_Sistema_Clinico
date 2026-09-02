@@ -22,9 +22,12 @@ vi.mock('../../services/clinicService', () => ({
   updateServiceCategory: vi.fn(),
 }))
 
-const renderPage = () => render(
+const renderPage = (permissions = ['clinic.manage', 'users.manage']) => render(
   <MemoryRouter>
-    <AuthContext.Provider value={{ accessToken: 'access-token' }}>
+    <AuthContext.Provider value={{
+      accessToken: 'access-token',
+      user: { permissions },
+    }}>
       <SettingsPage />
     </AuthContext.Provider>
   </MemoryRouter>,
@@ -116,6 +119,26 @@ describe('SettingsPage staff management', () => {
 
     expect(await screen.findByText('Aún no hay miembros registrados.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Añadir miembro' })).toBeInTheDocument()
+  })
+
+  it('shows only configuration sections allowed by effective capabilities', async () => {
+    renderPage(['clinic.manage'])
+
+    expect(screen.getByRole('button', { name: /Perfil de la clínica/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Horarios de atención/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Servicios y tarifas/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Gestión de Staff/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Permisos por rol/ })).not.toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'Perfil de la clínica' })
+    expect(userService.listUsers).not.toHaveBeenCalled()
+  })
+
+  it('opens staff as the first allowed section for a user-management capability', async () => {
+    renderPage(['users.manage'])
+
+    expect(screen.queryByRole('button', { name: /Perfil de la clínica/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Gestión de Staff/ })).toHaveAttribute('aria-current', 'page')
+    expect(await screen.findByText('Aún no hay miembros registrados.')).toBeInTheDocument()
   })
 
   it('does not expose notifications while that feature is outside the MVP', () => {
@@ -429,6 +452,98 @@ describe('SettingsPage staff management', () => {
       role: 'ODONTOLOGO',
       is_active: true,
     })
+  })
+
+  it('[HU-61] captures optional dentist credentials and preserves them across role changes', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '',
+      role: 'ODONTOLOGO',
+      specialty: 'Endodoncia',
+      professional_registration_number: 'REG-2048',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    expect(screen.getByLabelText('Especialidad')).toHaveValue('Endodoncia')
+    expect(screen.getByLabelText('Número de registro profesional')).toHaveValue('REG-2048')
+
+    fireEvent.change(screen.getByLabelText('Rol'), { target: { value: 'RECEPCIONISTA' } })
+    expect(screen.queryByLabelText('Especialidad')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Número de registro profesional')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      expect.objectContaining({
+        role: 'RECEPCIONISTA',
+        specialty: 'Endodoncia',
+        professional_registration_number: 'REG-2048',
+      }),
+    ))
+  })
+
+  it('[HU-61] lets an administrator clear optional dentist credentials', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '',
+      role: 'ODONTOLOGO',
+      specialty: 'Endodoncia',
+      professional_registration_number: 'REG-2048',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    fireEvent.change(screen.getByLabelText('Especialidad'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Número de registro profesional'), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      expect.objectContaining({
+        specialty: '',
+        professional_registration_number: '',
+      }),
+    ))
+  })
+
+  it('[HU-61] shows blank optional professional fields for a new dentist', async () => {
+    renderPage()
+    openStaff()
+    fireEvent.click(await screen.findByRole('button', { name: 'Añadir miembro' }))
+
+    expect(screen.getByLabelText('Especialidad')).toHaveValue('')
+    expect(screen.getByLabelText('Número de registro profesional')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('Especialidad'), {
+      target: { value: 'Odontopediatría' },
+    })
+    fireEvent.change(screen.getByLabelText('Número de registro profesional'), {
+      target: { value: 'MINSA 7788' },
+    })
+    fillForm()
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar usuario' }))
+
+    await waitFor(() => expect(userService.createUser).toHaveBeenCalledWith(
+      'access-token',
+      expect.objectContaining({
+        specialty: 'Odontopediatría',
+        professional_registration_number: 'MINSA 7788',
+      }),
+    ))
   })
 
   it('[HU-06] lets an administrator assign a new staff password', async () => {

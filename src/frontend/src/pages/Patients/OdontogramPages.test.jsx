@@ -78,8 +78,17 @@ function baseFetch(url, options = {}) {
   if (url.endsWith('/api/patients/1/consultations/12/odontogram/')) {
     return Promise.resolve(jsonResponse(initialVersion))
   }
+  if (url.endsWith('/api/patients/1/odontogram/planned-overlay/')) {
+    return Promise.resolve(jsonResponse([]))
+  }
   if (url.endsWith('/api/patients/1/consultations/12/')) {
     return Promise.resolve(jsonResponse(consultation))
+  }
+  if (url.endsWith('/api/patients/1/consultations/12/treatment-items/')) {
+    return Promise.resolve(jsonResponse([]))
+  }
+  if (url.includes('/api/clinics/services/?active=true')) {
+    return Promise.resolve(jsonResponse([]))
   }
   if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patient))
   throw new Error(`Unexpected request: ${url} ${options.method || 'GET'}`)
@@ -144,7 +153,7 @@ describe('versioned odontograms', () => {
     expect(posted.teeth['14'].current.surfaces.MESIAL).toEqual(['CARIES'])
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument())
     expect(screen.getByText('Versión 2')).toBeInTheDocument()
-  })
+  }, 10_000)
 
   it('keeps the odontogram read-only without consultation edit permission', async () => {
     vi.stubGlobal('fetch', vi.fn(baseFetch))
@@ -156,9 +165,15 @@ describe('versioned odontograms', () => {
     expect(screen.getByText('Solo lectura')).toBeInTheDocument()
   })
 
-  it('supports planned findings, keyboard editing, discard and navigation protection', async () => {
+  it('renders the structured plan as a read-only overlay and preserves duplicate details', async () => {
     let postCount = 0
     vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/odontogram/planned-overlay/')) {
+        return Promise.resolve(jsonResponse([
+          { treatment_item_id: 5, status: 'PROPUESTO', status_display: 'Propuesto', tooth_code: '14', surfaces: ['MESIAL'], planned_finding: 'RESTORATION', description: 'Primera restauración', proposed_in: { id: 8, date: '2026-08-01' } },
+          { treatment_item_id: 9, status: 'ACEPTADO', status_display: 'Aceptado', tooth_code: '14', surfaces: ['MESIAL'], planned_finding: 'RESTORATION', description: 'Segunda restauración', proposed_in: { id: 12, date: '2026-08-09' } },
+        ]))
+      }
       if (url.endsWith('/odontogram/versions/') && options.method === 'POST') {
         postCount += 1
       }
@@ -168,17 +183,27 @@ describe('versioned odontograms', () => {
 
     await screen.findByRole('heading', { name: 'Odontograma clínico' })
     fireEvent.click(screen.getByRole('button', { name: 'Plan de tratamiento' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Restauración' }))
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Pieza 14, superficie mesial' }), { key: 'Enter' })
-    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '14' }))
 
-    fireEvent.click(screen.getByRole('link', { name: /Volver a la consulta/ }))
-    expect(await screen.findByRole('dialog', { name: 'Cambios sin guardar' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }))
+    expect(screen.getByText('Primera restauración')).toBeInTheDocument()
+    expect(screen.getByText('Segunda restauración')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Restauración' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument()
     expect(postCount).toBe(0)
   }, 10_000)
+
+  it('keeps the core odontogram available when the planned overlay fails', async () => {
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/odontogram/planned-overlay/')) {
+        return Promise.reject(new Error('Overlay temporalmente no disponible'))
+      }
+      return baseFetch(url, options)
+    }))
+    renderAt('/pacientes/1/consultas/12/odontograma')
+
+    expect(await screen.findByRole('heading', { name: 'Odontograma clínico' })).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Overlay temporalmente no disponible')
+  })
 
   it('preserves the draft after a concurrent change and can load the latest version', async () => {
     let latest = initialVersion
@@ -244,6 +269,53 @@ describe('versioned odontograms', () => {
     expect(screen.getByLabelText('Versión A')).toHaveValue('41')
     expect(screen.getByLabelText('Versión B')).toHaveValue('42')
     expect(await screen.findByText('Pieza 14: hallazgo agregado')).toBeInTheDocument()
+  })
+
+  it('coalesces comparison scroll to the latest frame without changing versions or looping', async () => {
+    const secondVersion = {
+      ...initialVersion,
+      id: 42,
+      version_number: 2,
+      based_on: 41,
+      changed_teeth: ['14'],
+    }
+    const frames = []
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback) => {
+      frames.push(callback)
+      return frames.length
+    }))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/odontogram-versions/')) {
+        const { teeth: _firstTeeth, ...firstSummary } = initialVersion
+        const { teeth: _secondTeeth, ...secondSummary } = secondVersion
+        return Promise.resolve(jsonResponse([secondSummary, firstSummary]))
+      }
+      if (url.endsWith('/api/patients/1/odontogram-versions/41/')) return Promise.resolve(jsonResponse(initialVersion))
+      if (url.endsWith('/api/patients/1/odontogram-versions/42/')) return Promise.resolve(jsonResponse(secondVersion))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patient))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAt('/pacientes/1/odontogramas')
+
+    const chartA = await screen.findByRole('region', { name: 'Versión A: odontograma' })
+    const chartB = screen.getByRole('region', { name: 'Versión B: odontograma' })
+    const scheduledBeforeScroll = requestAnimationFrame.mock.calls.length
+
+    chartA.scrollLeft = 120
+    fireEvent.scroll(chartA)
+    chartA.scrollLeft = 260
+    fireEvent.scroll(chartA)
+
+    expect(chartB.scrollLeft).toBe(0)
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(scheduledBeforeScroll + 1)
+    frames[scheduledBeforeScroll](16)
+    expect(chartB.scrollLeft).toBe(260)
+
+    fireEvent.scroll(chartB)
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(scheduledBeforeScroll + 1)
+    expect(screen.getByLabelText('Versión A')).toHaveValue('41')
+    expect(screen.getByLabelText('Versión B')).toHaveValue('42')
   })
 
   it('pages the odontogram timeline without downloading the complete history', async () => {

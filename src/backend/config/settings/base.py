@@ -23,13 +23,14 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "apps.audit.middleware.RequestIdMiddleware",
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "apps.audit.middleware.RequestIdMiddleware",
     "apps.audit.middleware.AuditTrailMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -95,3 +96,16 @@ REFRESH_COOKIE_SAMESITE = "Lax"
 API_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
 API_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 ENABLE_DJANGO_ADMIN = True
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"null": {"class": "logging.NullHandler"}},
+    "loggers": {
+        "dentalclinic.request": {
+            "handlers": ["null"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
