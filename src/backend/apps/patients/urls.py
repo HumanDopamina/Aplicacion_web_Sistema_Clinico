@@ -1,4 +1,5 @@
 from django.urls import path
+from .views import PatientDocumentRestoreView
 
 from .views import (
     ConsultationOdontogramView,
@@ -34,6 +35,10 @@ app_name = "patients"
 
 
 urlpatterns = [
+    path(
+        "<int:patient_pk>/documents/<int:pk>/restore/",
+        PatientDocumentRestoreView.as_view(), name="patient-document-restore",
+    ),
     path("", PatientListCreateView.as_view(), name="patient-list-create"),
     path(
         "duplicate-check/",

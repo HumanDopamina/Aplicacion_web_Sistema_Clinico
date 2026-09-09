@@ -1,5 +1,5 @@
-from django.utils.dateparse import parse_date
 from rest_framework import generics, pagination, permissions, serializers
+from apps.common.query_parameters import validated_parameter
 
 from apps.users.models import User
 
@@ -39,13 +39,15 @@ class AuditEventListView(generics.ListAPIView):
         ):
             value = self.request.query_params.get(field)
             if value not in (None, ""):
+                if field in ("actor_id", "patient_id"):
+                    value = validated_parameter(
+                        self.request.query_params, field, serializers.IntegerField(min_value=1),
+                    )
                 queryset = queryset.filter(**{field: value})
 
         for parameter, lookup in (("date_from", "occurred_at__date__gte"), ("date_to", "occurred_at__date__lte")):
             value = self.request.query_params.get(parameter)
             if value:
-                parsed = parse_date(value)
-                if parsed is None:
-                    raise serializers.ValidationError({parameter: "Usa una fecha válida en formato AAAA-MM-DD."})
+                parsed = validated_parameter(self.request.query_params, parameter, serializers.DateField())
                 queryset = queryset.filter(**{lookup: parsed})
         return queryset

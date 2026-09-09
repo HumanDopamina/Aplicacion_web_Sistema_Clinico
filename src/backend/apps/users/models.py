@@ -76,3 +76,10 @@ class RolePermissionPreset(models.Model):
 
     def __str__(self):
         return self.get_role_display()
+
+
+class PendingFileDeletion(models.Model):
+    storage_kind = models.CharField(max_length=10, choices=(("avatar", "Avatar"), ("logo", "Logo")))
+    name = models.CharField(max_length=512)
+    attempts = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)

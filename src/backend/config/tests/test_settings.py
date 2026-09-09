@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from django.test import SimpleTestCase
 
@@ -55,6 +56,42 @@ class DevelopmentDatabaseSettingsTests(SimpleTestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(
             "django.db.backends.postgresql clinic_development db.example.test 5544",
+            result.stdout,
+        )
+
+    def test_development_loads_database_url_from_a_controlled_dotenv_file(self):
+        with TemporaryDirectory() as temporary_directory:
+            dotenv_path = Path(temporary_directory) / ".env"
+            dotenv_path.write_text(
+                "DATABASE_URL=postgresql://dotenv_user:synthetic@dotenv.example.test:5544/dotenv_database\n",
+                encoding="utf-8",
+            )
+            env = {**os.environ}
+            env.pop("DATABASE_URL", None)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import sys; from pathlib import Path; "
+                        "import config.settings.base as base; "
+                        "base.BASE_DIR = Path(sys.argv[1]); "
+                        "import config.settings.development as development; "
+                        "database = development.DATABASES['default']; "
+                        "print(database['ENGINE'], database['NAME'], database['HOST'], database['PORT'])"
+                    ),
+                    temporary_directory,
+                ],
+                cwd=BACKEND_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "django.db.backends.postgresql dotenv_database dotenv.example.test 5544",
             result.stdout,
         )
 

@@ -18,6 +18,9 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from PIL import Image
 
+from apps.audit.models import AuditEvent
+from apps.patients.models import Patient
+
 from .models import User
 
 
@@ -112,14 +115,14 @@ class LoginApiTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer invalid-token")
         self.assertEqual(self.client.get(url).status_code, 401)
 
-    def test_logout_requires_authentication(self):
+    def test_logout_without_session_is_idempotent(self):
         response = self.client.post(
             reverse("users:logout"),
             {"refresh": "invalid-token"},
             format="json",
         )
 
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 204)
 
     def test_logout_blacklists_the_refresh_token(self):
         login_response = self.client.post(
@@ -495,22 +498,24 @@ class CurrentUserProfileApiTests(APITestCase):
         ))
         first_url = uploaded.data["avatar_url"]
 
-        replaced = self.client.patch(
-            reverse("users:current-user"),
-            {"avatar": profile_image("replacement.png")},
-            format="multipart",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            replaced = self.client.patch(
+                reverse("users:current-user"),
+                {"avatar": profile_image("replacement.png")},
+                format="multipart",
+            )
         self.assertEqual(replaced.status_code, 200)
         self.user.refresh_from_db()
         self.assertNotEqual(self.user.avatar.name, first_name)
         self.assertFalse(self.user.avatar.storage.exists(first_name))
         self.assertNotEqual(replaced.data["avatar_url"], first_url)
 
-        removed = self.client.patch(
-            reverse("users:current-user"),
-            {"remove_avatar": True},
-            format="multipart",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            removed = self.client.patch(
+                reverse("users:current-user"),
+                {"remove_avatar": True},
+                format="multipart",
+            )
         self.assertEqual(removed.status_code, 200)
         self.user.refresh_from_db()
         self.assertFalse(self.user.avatar)
@@ -889,6 +894,96 @@ class UserRegistrationApiTests(APITestCase):
         self.assertEqual(len(response.data["results"]), 2)
         self.assertIsNotNone(response.data["next"])
 
+    def test_staff_list_filters_active_archived_and_all_users(self):
+        active = User.objects.create_user(
+            email="activo-filtro@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        archived = User.objects.create_user(
+            email="archivado-filtro@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.RECEPCIONISTA,
+            is_active=False,
+        )
+        self.client.force_authenticate(self.admin)
+
+        active_response = self.client.get(self.url, {"status": "active"})
+        archived_response = self.client.get(self.url, {"status": "archived"})
+        all_response = self.client.get(self.url, {"status": "all"})
+
+        self.assertEqual(active_response.status_code, 200)
+        self.assertEqual(
+            {item["id"] for item in active_response.data["results"]},
+            {self.admin.pk, active.pk},
+        )
+        self.assertEqual(archived_response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in archived_response.data["results"]],
+            [archived.pk],
+        )
+        self.assertEqual(all_response.status_code, 200)
+        self.assertEqual(all_response.data["count"], 3)
+
+    def test_staff_status_filter_is_applied_before_pagination(self):
+        for index in range(4):
+            User.objects.create_user(
+                email=f"archivado-{index}@dentalclinic.com",
+                password="ContraseñaSegura123!",
+                role=User.Role.RECEPCIONISTA,
+                is_active=False,
+            )
+        for index in range(2):
+            User.objects.create_user(
+                email=f"activo-{index}@dentalclinic.com",
+                password="ContraseñaSegura123!",
+                role=User.Role.ODONTOLOGO,
+            )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(
+            self.url,
+            {"status": "active", "page": 2, "page_size": 2},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 3)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertTrue(all(item["is_active"] for item in response.data["results"]))
+
+    def test_staff_search_is_combined_with_the_active_status_filter(self):
+        active_match = User.objects.create_user(
+            email="ana.activa@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Ana",
+            last_name="Activa",
+            role=User.Role.ODONTOLOGO,
+        )
+        User.objects.create_user(
+            email="ana.archivada@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Ana",
+            last_name="Archivada",
+            role=User.Role.RECEPCIONISTA,
+            is_active=False,
+        )
+        User.objects.create_user(
+            email="bruno@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Bruno",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(
+            self.url,
+            {"status": "active", "search": "Ana"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], active_match.pk)
+
     def test_administrator_creates_a_login_ready_user_without_exposing_password(self):
         self.client.force_authenticate(self.admin)
 
@@ -1083,6 +1178,21 @@ class UserRegistrationApiTests(APITestCase):
             role=User.Role.RECEPCIONISTA,
         )
         original_id = member.pk
+        patient = Patient.objects.create(
+            first_name="Paciente",
+            last_name="Histórico",
+            birth_place="Managua",
+            gender=Patient.Gender.FEMENINO,
+            date_of_birth=datetime(1990, 1, 1).date(),
+            registered_by=member,
+        )
+        original_values = (
+            member.email,
+            member.first_name,
+            member.last_name,
+            member.role,
+            member.token_version,
+        )
         self.client.force_authenticate(self.admin)
 
         response = self.client.patch(
@@ -1094,6 +1204,18 @@ class UserRegistrationApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         member.refresh_from_db()
         self.assertFalse(member.is_active)
+        self.assertEqual(
+            (
+                member.email,
+                member.first_name,
+                member.last_name,
+                member.role,
+                member.token_version,
+            ),
+            (*original_values[:-1], original_values[-1] + 1),
+        )
+        patient.refresh_from_db()
+        self.assertEqual(patient.registered_by_id, original_id)
         self.assertTrue(
             User.objects.filter(
                 pk=original_id,
@@ -1103,6 +1225,8 @@ class UserRegistrationApiTests(APITestCase):
                 role=User.Role.RECEPCIONISTA,
             ).exists()
         )
+        event = AuditEvent.objects.get(request_id=response["X-Request-ID"])
+        self.assertEqual(event.action, "USER_ARCHIVED")
 
         self.client.force_authenticate(user=None)
         login = self.client.post(
@@ -1117,9 +1241,46 @@ class UserRegistrationApiTests(APITestCase):
             "Correo electrónico o contraseña incorrectos.",
         )
 
-    def test_hu07_user_detail_does_not_allow_deletion(self):
+    def test_administrator_reactivates_the_same_archived_user(self):
         member = User.objects.create_user(
-            email="conservar@dentalclinic.com",
+            email="reactivar@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+            is_active=False,
+        )
+        original_id = member.pk
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+            {"is_active": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        member.refresh_from_db()
+        self.assertEqual(member.pk, original_id)
+        self.assertTrue(member.is_active)
+        event = AuditEvent.objects.get(request_id=response["X-Request-ID"])
+        self.assertEqual(event.action, "USER_REACTIVATED")
+
+    def test_administrator_cannot_archive_their_own_account(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": self.admin.pk}),
+            {"is_active": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("is_active", response.data)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.is_active)
+
+    def test_administrator_deletes_an_unreferenced_user(self):
+        member = User.objects.create_user(
+            email="eliminar@dentalclinic.com",
             password="ContraseñaOriginal123!",
             role=User.Role.ODONTOLOGO,
         )
@@ -1129,7 +1290,68 @@ class UserRegistrationApiTests(APITestCase):
             reverse("users:user-detail", kwargs={"pk": member.pk}),
         )
 
-        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(User.objects.filter(pk=member.pk).exists())
+
+    def test_administrator_cannot_delete_their_own_account(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(
+            reverse("users:user-detail", kwargs={"pk": self.admin.pk}),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["detail"],
+            "No puedes eliminar tu propia cuenta.",
+        )
+        self.assertTrue(User.objects.filter(pk=self.admin.pk).exists())
+
+    def test_administrator_cannot_delete_a_user_with_clinical_history(self):
+        member = User.objects.create_user(
+            email="con-historial@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        Patient.objects.create(
+            first_name="Ana",
+            last_name="Pérez",
+            birth_place="Managua",
+            gender=Patient.Gender.FEMENINO,
+            date_of_birth=datetime(1990, 1, 1).date(),
+            registered_by=member,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["detail"],
+            "Este usuario tiene historial asociado y no puede eliminarse. Desactívalo para conservar la trazabilidad.",
+        )
+        self.assertTrue(User.objects.filter(pk=member.pk).exists())
+
+    def test_non_administrator_cannot_delete_a_user(self):
+        receptionist = User.objects.create_user(
+            email="recepcion-eliminar@dentalclinic.com",
+            password="ContraseñaRecepcion123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        member = User.objects.create_user(
+            email="objetivo-eliminar@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.client.force_authenticate(receptionist)
+
+        response = self.client.delete(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+        )
+
+        self.assertEqual(response.status_code, 403)
         self.assertTrue(User.objects.filter(pk=member.pk).exists())
 
     def test_update_rejects_an_email_used_by_another_user(self):
@@ -1164,13 +1386,13 @@ class UserRegistrationApiTests(APITestCase):
 
         response = self.client.patch(
             reverse("users:user-detail", kwargs={"pk": self.admin.pk}),
-            {"first_name": "Alterado"},
+            {"is_active": False},
             format="json",
         )
 
         self.assertEqual(response.status_code, 403)
         self.admin.refresh_from_db()
-        self.assertEqual(self.admin.first_name, "Admin")
+        self.assertTrue(self.admin.is_active)
 
 
 class RolePermissionPresetApiTests(APITestCase):

@@ -402,10 +402,10 @@ describe('AppointmentsPage', () => {
     renderFollowUpPage()
 
     const dialog = await screen.findByRole('dialog', { name: 'Nueva cita' })
-    expect(within(dialog).getByLabelText('Paciente')).toHaveValue('1')
+    await waitFor(() => expect(within(dialog).getByLabelText('Paciente')).toHaveValue('1'))
     expect(within(dialog).getByRole('option', { name: 'Ana Pérez · PAC-00001' })).toBeInTheDocument()
     expect(within(dialog).getByLabelText('Odontólogo')).toHaveValue('3')
-    expect(within(dialog).getByLabelText(/Servicio/)).toHaveValue('4')
+    await waitFor(() => expect(within(dialog).getByLabelText(/Servicio/)).toHaveValue('4'))
     expect(within(dialog).getByLabelText('Duración')).toHaveValue('45')
     expect(within(dialog).getByLabelText('Motivo')).toHaveValue('Restauración de resina')
     expect(within(dialog).getByLabelText('Fecha')).toHaveValue('')

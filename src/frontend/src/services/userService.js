@@ -10,13 +10,16 @@ const profileFormData = (values) => {
   return data
 }
 
-export const listUsers = (access, page, pageSize) => {
+export const listUsers = (access, options = {}) => {
+  const { page, pageSize, status, search } = options
   const query = new URLSearchParams()
   if (page) query.set('page', page)
   if (pageSize) query.set('page_size', pageSize)
+  if (status) query.set('status', status)
+  if (search) query.set('search', search)
   const suffix = query.size ? `?${query.toString()}` : ''
   return apiRequest(`/api/auth/users/${suffix}`, {
-  headers: auth(access),
+    headers: auth(access),
   })
 }
 
@@ -29,6 +32,11 @@ export const createUser = (access, user) => apiRequest('/api/auth/users/', {
 export const updateUser = (access, id, changes) => apiRequest(`/api/auth/users/${id}/`, {
   method: 'PATCH',
   body: profileFormData(changes),
+  headers: auth(access),
+})
+
+export const deleteUser = (access, id) => apiRequest(`/api/auth/users/${id}/`, {
+  method: 'DELETE',
   headers: auth(access),
 })
 

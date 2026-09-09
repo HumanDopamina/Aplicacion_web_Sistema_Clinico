@@ -36,6 +36,7 @@ def https_origins(name, required_value=False):
 
 SECRET_KEY = required("DJANGO_SECRET_KEY")
 DEBUG = False
+REQUIRE_EDIT_VERSION = True
 ALLOWED_HOSTS = csv_required("ALLOWED_HOSTS")
 if "*" in ALLOWED_HOSTS:
     raise ImproperlyConfigured("ALLOWED_HOSTS no puede contener comodines en producción.")

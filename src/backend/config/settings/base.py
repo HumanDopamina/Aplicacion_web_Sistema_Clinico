@@ -64,6 +64,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 REST_FRAMEWORK = {
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.users.authentication.VersionedJWTAuthentication",
     ),
@@ -96,6 +97,10 @@ REFRESH_COOKIE_SAMESITE = "Lax"
 API_CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
 API_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
 ENABLE_DJANGO_ADMIN = True
+REQUIRE_EDIT_VERSION = False  # Compatibility during the frontend rollout.
+DEMO_MODE = False
+UPLOADS_ENABLED = True
+PASSWORD_RESET_ENABLED = True
 
 LOGGING = {
     "version": 1,

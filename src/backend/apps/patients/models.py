@@ -1,12 +1,13 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from apps.common.versioning import VersionedModel
 
 from .documents import patient_document_path, private_document_storage
 from .identifiers import identification_key_expression
 
 
-class Patient(models.Model):
+class Patient(VersionedModel):
     class Gender(models.TextChoices):
         FEMENINO = "FEMENINO", "Femenino"
         MASCULINO = "MASCULINO", "Masculino"
@@ -219,7 +220,7 @@ class ClinicalRecord(models.Model):
         return f"Expediente · {self.patient}"
 
 
-class Consultation(models.Model):
+class Consultation(VersionedModel):
     class Type(models.TextChoices):
         INITIAL_ASSESSMENT = "VALORACION_INICIAL", "Valoración inicial"
         GENERAL = "GENERAL", "Consulta general"
@@ -324,7 +325,7 @@ class Consultation(models.Model):
         return f"{self.get_consultation_type_display()} · {self.patient} · {self.date}"
 
 
-class TreatmentItem(models.Model):
+class TreatmentItem(VersionedModel):
     class Status(models.TextChoices):
         PROPOSED = "PROPUESTO", "Propuesto"
         ACCEPTED = "ACEPTADO", "Aceptado"
@@ -477,7 +478,20 @@ class OdontogramVersion(models.Model):
         return f"Odontograma {self.patient} · versión {self.version_number}"
 
 
+class ActiveDocumentManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+
+
 class PatientDocument(models.Model):
+    objects = ActiveDocumentManager()
+    all_objects = models.Manager()
+    deleted_at = models.DateTimeField(null=True, blank=True, editable=False)
+    deleted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="retired_patient_documents", editable=False,
+    )
+    deletion_reason = models.CharField(max_length=1000, blank=True, editable=False)
     patient = models.ForeignKey(
         Patient,
         on_delete=models.PROTECT,

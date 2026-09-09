@@ -2,9 +2,13 @@ import os
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 from .base import *  # noqa: F403
+from .base import BASE_DIR
 
+
+load_dotenv(BASE_DIR / ".env", override=False)
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-development-only-not-for-production")
 DEBUG = True

@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import Case, F, IntegerField, Q, Value, When, Window
 from django.db.models.functions import Coalesce, RowNumber
 from django.http import FileResponse, Http404, HttpResponse
@@ -12,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.users.permissions import HasCapability, user_has_permission
+from apps.users.models import User
 from apps.clinics.availability import clinic_today
 from apps.clinics.models import ClinicProfile
 from apps.common.pagination import StandardPageNumberPagination
@@ -91,6 +93,7 @@ class PatientClinicalRecordExportView(APIView):
             patient=patient,
             clinic=clinic,
             generated_at=timezone.now(),
+            include_documents=user_has_permission(request.user, "documents.view"),
         )
         safe_code = "".join(
             character if character.isalnum() or character in "-_" else "-"
@@ -323,7 +326,7 @@ class PatientConsultationListView(generics.ListCreateAPIView):
         patient = self.get_patient()
         if self.request.query_params.get("compact", "").lower() == "true":
             return Consultation.objects.filter(patient_id=patient.pk).only("id", "date")
-        return Consultation.objects.select_related("professional").filter(
+        return Consultation.objects.select_related("professional", "completed_by").filter(
             patient_id=patient.pk
         )
 
@@ -452,7 +455,7 @@ class PatientConsultationDetailView(generics.RetrieveUpdateAPIView):
     http_method_names = ("get", "patch", "head", "options")
 
     def get_queryset(self):
-        return Consultation.objects.select_related("patient", "professional").filter(
+        return Consultation.objects.select_related("patient", "professional", "completed_by").filter(
             patient_id=self.kwargs["patient_pk"]
         )
 
@@ -759,12 +762,18 @@ class PatientDocumentListCreateView(APIView):
 
     def get(self, request, patient_pk):
         self.get_patient()
-        queryset = PatientDocument.objects.select_related(
+        retired = request.query_params.get("retired") == "true"
+        if retired and request.user.role != User.Role.ADMINISTRADOR:
+            raise PermissionDenied("Solo un administrador puede consultar documentos retirados.")
+        manager = PatientDocument.all_objects if retired else PatientDocument.objects
+        queryset = manager.select_related(
             "uploaded_by",
             "consultation",
         ).filter(
             patient_id=patient_pk,
         )
+        if retired:
+            queryset = queryset.filter(deleted_at__isnull=False)
         category = request.query_params.get("category", "").strip()
         search = request.query_params.get("search", "").strip()
         if category:
@@ -866,12 +875,35 @@ class PatientDocumentDeleteView(APIView):
                 {"detail": "El paciente está inactivo; sus documentos son de solo lectura."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        storage = document.file.storage
-        stored_name = document.file.name
-        document.delete()
-        if stored_name:
-            storage.delete(stored_name)
+        from rest_framework import serializers
+
+        class RetirementInput(serializers.Serializer):
+            reason = serializers.CharField(max_length=1000, allow_blank=False)
+
+        payload = RetirementInput(data=request.data)
+        payload.is_valid(raise_exception=True)
+        PatientDocument.all_objects.filter(pk=document.pk, deleted_at__isnull=True).update(
+            deleted_at=timezone.now(), deleted_by=request.user,
+            deletion_reason=payload.validated_data["reason"],
+        )
+        request._request.audit_action = "DOCUMENT_RETIRED"
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PatientDocumentRestoreView(APIView):
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, patient_pk, pk):
+        if request.user.role != User.Role.ADMINISTRADOR:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        with transaction.atomic():
+            document = get_object_or_404(
+                PatientDocument.all_objects.select_for_update(), pk=pk, patient_id=patient_pk,
+            )
+            document.deleted_at = None
+            document.save(update_fields=["deleted_at"])
+        request._request.audit_action = "DOCUMENT_RESTORED"
+        return Response(PatientDocumentSerializer(document, context={"request": request}).data)
 
 
 class PatientDocumentContentView(APIView):

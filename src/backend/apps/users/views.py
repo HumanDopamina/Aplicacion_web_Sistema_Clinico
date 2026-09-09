@@ -6,14 +6,16 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
+from django.db import transaction
 from django.db.models import F
+from django.db.models.deletion import ProtectedError
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
-from rest_framework import generics
+from rest_framework import filters, generics
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -39,6 +41,8 @@ from .models import RolePermissionPreset, User
 from .login_limiter import LoginAttemptLimiter, WINDOW_SECONDS
 from .permissions import PERMISSION_CATALOG
 from .session import clear_refresh_cookie, set_refresh_cookie
+from .authentication import LogoutJWTAuthentication
+from .file_cleanup import schedule_file_deletion
 
 
 PASSWORD_RESET_MESSAGE = (
@@ -52,6 +56,8 @@ class LoginView(APIView):
     authentication_classes = []
 
     def post(self, request):
+        if not isinstance(request.data, dict) or not isinstance(request.data.get("email", ""), str):
+            raise serializers.ValidationError({"email": "Indica un correo electrónico válido."})
         limiter = LoginAttemptLimiter(request, request.data.get("email", ""))
         if limiter.is_blocked():
             return Response(
@@ -156,20 +162,29 @@ class UserAvatarView(APIView):
 
 @method_decorator(csrf_protect, name="dispatch")
 class LogoutView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = []
+    authentication_classes = [LogoutJWTAuthentication]
 
+    @transaction.atomic
     def post(self, request):
+        user = request.user if request.user.is_authenticated else None
         refresh = request.COOKIES.get(settings.REFRESH_COOKIE_NAME)
         if refresh:
             try:
                 token = RefreshToken(refresh)
-                if str(token["user_id"]) == str(request.user.pk):
+                if user is None:
+                    user = User.objects.filter(
+                        pk=token["user_id"], token_version=token.get("token_version"),
+                    ).first()
+                if user and str(token["user_id"]) == str(user.pk):
                     token.blacklist()
             except TokenError:
                 pass
-        type(request.user).objects.filter(pk=request.user.pk).update(
-            token_version=F("token_version") + 1,
-        )
+        if user:
+            User.objects.filter(pk=user.pk, token_version=user.token_version).update(
+                token_version=F("token_version") + 1,
+            )
+            request._request.audit_actor = user
         response = Response(status=status.HTTP_204_NO_CONTENT)
         clear_refresh_cookie(response)
         return response
@@ -183,6 +198,8 @@ class PasswordResetRequestView(APIView):
 
     def post(self, request):
         serializer = PasswordResetRequestSerializer(data=request.data)
+        if not settings.PASSWORD_RESET_ENABLED:
+            return Response({"detail": "En la demo, solicita al administrador que cambie tu contraseña."}, status=403)
         serializer.is_valid(raise_exception=True)
         user = get_user_model().objects.filter(
             email__iexact=serializer.validated_data["email"],
@@ -220,6 +237,8 @@ class PasswordResetConfirmView(APIView):
             data=request.data,
             context={"user_model": get_user_model()},
         )
+        if not settings.PASSWORD_RESET_ENABLED:
+            return Response({"detail": "La recuperación por correo está deshabilitada en la demo."}, status=403)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(
@@ -277,6 +296,21 @@ class UserCollectionView(generics.ListCreateAPIView):
     serializer_class = UserAdminSerializer
     queryset = User.objects.order_by("first_name", "email")
     pagination_class = StandardPageNumberPagination
+    filter_backends = [filters.SearchFilter]
+    search_fields = ("email", "first_name", "last_name")
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        staff_status = self.request.query_params.get("status", "all")
+        if staff_status == "active":
+            return queryset.filter(is_active=True)
+        if staff_status == "archived":
+            return queryset.filter(is_active=False)
+        if staff_status == "all":
+            return queryset
+        raise serializers.ValidationError({
+            "status": "Usa active, archived o all.",
+        })
 
     def perform_create(self, serializer):
         set_staff_audit_fields(self.request, serializer.validated_data)
@@ -289,8 +323,40 @@ class UserDetailView(generics.UpdateAPIView):
     queryset = User.objects.all()
 
     def perform_update(self, serializer):
+        was_active = serializer.instance.is_active
         set_staff_audit_fields(self.request, serializer.validated_data)
-        serializer.save()
+        user = serializer.save()
+        if was_active != user.is_active:
+            self.request._request.audit_action = (
+                "USER_REACTIVATED" if user.is_active else "USER_ARCHIVED"
+            )
+
+    def delete(self, request, *args, **kwargs):
+        user = self.get_object()
+        if user.pk == request.user.pk:
+            return Response(
+                {"detail": "No puedes eliminar tu propia cuenta."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        avatar_name = user.avatar.name
+        try:
+            with transaction.atomic():
+                user.delete()
+        except ProtectedError:
+            return Response(
+                {
+                    "detail": (
+                        "Este usuario tiene historial asociado y no puede eliminarse. "
+                        "Desactívalo para conservar la trazabilidad."
+                    ),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        if avatar_name:
+            schedule_file_deletion("avatar", avatar_name)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class RolePermissionPresetCollectionView(APIView):

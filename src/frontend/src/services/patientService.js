@@ -256,6 +256,7 @@ export const updatePatient = (access, id, changes) => apiRequest(`/api/patients/
 
 export const listPatientDocuments = (access, patientId, filters = {}) => {
   const query = new URLSearchParams()
+  if (filters.retired) query.set('retired', 'true')
   if (filters.search?.trim()) query.set('search', filters.search.trim())
   if (filters.category?.trim()) query.set('category', filters.category.trim())
   if (filters.consultationId) query.set('consultation_id', filters.consultationId)
@@ -291,9 +292,14 @@ export const getPatientDocumentContent = (access, patientId, documentId, downloa
   )
 )
 
-export const deletePatientDocument = (access, patientId, documentId) => apiRequest(
+export const deletePatientDocument = (access, patientId, documentId, reason) => apiRequest(
   `/api/patients/${patientId}/documents/${documentId}/`,
-  { method: 'DELETE', headers: authorization(access) },
+  { method: 'DELETE', body: JSON.stringify({ reason }), headers: authorization(access) },
+)
+
+export const restorePatientDocument = (access, patientId, documentId) => apiRequest(
+  `/api/patients/${patientId}/documents/${documentId}/restore/`,
+  { method: 'POST', headers: authorization(access) },
 )
 
 export const updatePatientDocument = (access, patientId, documentId, changes) => apiRequest(

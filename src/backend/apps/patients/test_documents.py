@@ -23,8 +23,12 @@ def png_file(name="radiografia.png", color="white"):
 
 
 def pdf_file(name="informe.pdf", padding=b""):
-    content = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n" + padding + b"\n%%EOF"
-    return SimpleUploadedFile(name, content, content_type="application/pdf")
+    from pypdf import PdfWriter
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    content = BytesIO()
+    writer.write(content)
+    return SimpleUploadedFile(name, content.getvalue() + padding, content_type="application/pdf")
 
 
 def corrupt_png_file(name="corrupta.png"):
@@ -36,6 +40,16 @@ def corrupt_png_file(name="corrupta.png"):
 
 
 class PatientDocumentApiTests(APITestCase):
+    def test_audit_failure_rolls_back_upload_and_removes_the_new_file(self):
+        self.client.force_authenticate(self.receptionist)
+        with patch("apps.audit.middleware.AuditEvent.objects.create", side_effect=RuntimeError("Audit unavailable")):
+            with self.assertRaises(RuntimeError):
+                self.client.post(self.list_url(), {
+                    "files": [png_file()], "category": "Prueba", "document_date": "2026-08-09",
+                }, format="multipart")
+        self.assertFalse(PatientDocument.objects.exists())
+        self.assertEqual([path for path in self.private_root.rglob("*") if path.is_file()], [])
+
     def setUp(self):
         self.private_root = Path(tempfile.mkdtemp(prefix="patient-documents-"))
         self.settings_override = override_settings(PRIVATE_MEDIA_ROOT=self.private_root)
@@ -485,7 +499,7 @@ class PatientDocumentApiTests(APITestCase):
         self.assertIn("inactivo", str(upload.data).lower())
         self.assertEqual(deleted.status_code, 400)
 
-    def test_configurable_delete_removes_database_record_and_physical_file(self):
+    def test_configurable_delete_preserves_file_and_supports_admin_restore(self):
         self.client.force_authenticate(self.receptionist)
         created = self.upload(png_file())[0]
         stored_path = next(path for path in self.private_root.rglob("*") if path.is_file())
@@ -493,11 +507,22 @@ class PatientDocumentApiTests(APITestCase):
         preset.permissions = [*preset.permissions, "documents.delete"]
         preset.save(update_fields=("permissions",))
 
-        response = self.client.delete(f"{self.list_url()}{created['id']}/")
+        response = self.client.delete(
+            f"{self.list_url()}{created['id']}/", {"reason": "Documento duplicado"}, format="json",
+        )
 
         self.assertEqual(response.status_code, 204)
-        self.assertFalse(stored_path.exists())
+        self.assertTrue(stored_path.exists())
         self.assertEqual(self.client.get(self.list_url()).data["results"], [])
+        self.assertEqual(self.client.get(f"{self.list_url()}?retired=true").status_code, 403)
+        self.assertEqual(self.client.get(created["content_url"]).status_code, 404)
+        restore_url = f"{self.list_url()}{created['id']}/restore/"
+        self.assertEqual(self.client.post(restore_url).status_code, 403)
+        self.client.force_authenticate(self.admin)
+        retired = self.client.get(f"{self.list_url()}?retired=true")
+        self.assertEqual([item["id"] for item in retired.data["results"]], [created["id"]])
+        self.assertEqual(self.client.post(restore_url).status_code, 200)
+        self.assertEqual(self.client.get(created["content_url"]).status_code, 200)
 
     def test_missing_capability_is_denied_even_when_patient_exists(self):
         preset = RolePermissionPreset.objects.get(role=User.Role.RECEPCIONISTA)

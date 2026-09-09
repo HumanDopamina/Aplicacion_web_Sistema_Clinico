@@ -88,8 +88,10 @@ export function AuthProvider({ children, initialSession }) {
 
   const signOut = useCallback(async ({ revoke = true } = {}) => {
     const access = session?.access
+    clearAccessToken()
+    setSession(null)
     try {
-      if (revoke && access) await revokeSession({ access })
+      if (revoke) await revokeSession({ access })
     } catch {
       // La sesión local se cierra aunque la API no esté disponible.
     } finally {

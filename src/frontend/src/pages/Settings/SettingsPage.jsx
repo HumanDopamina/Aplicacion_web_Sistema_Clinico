@@ -1,3 +1,4 @@
+import { useSystemFeatures } from '../../context/systemFeaturesValue'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../context/authContextValue'
@@ -38,6 +39,10 @@ const roleLabels = {
   ODONTOLOGO: 'Odontólogo',
 }
 
+const userDisplayName = (user) => (
+  `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email
+)
+
 const emptyForm = {
   first_name: '',
   last_name: '',
@@ -51,6 +56,7 @@ const emptyForm = {
 }
 
 function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
+  const { uploads } = useSystemFeatures()
   const isEditing = Boolean(editingUser)
   const [form, setForm] = useState(() => editingUser ? {
     email: editingUser.email,
@@ -60,7 +66,6 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
     role: editingUser.role,
     specialty: editingUser.specialty || '',
     professional_registration_number: editingUser.professional_registration_number || '',
-    is_active: editingUser.is_active,
   } : emptyForm)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -206,7 +211,7 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
             <div className="flex flex-wrap items-center gap-4">
               {avatarPreview ? <span className="grid h-14 w-14 overflow-hidden rounded-full bg-blue-100"><img src={avatarPreview} alt="Vista previa de la foto del miembro" className="h-full w-full object-cover" /></span> : <AuthenticatedAvatar user={removeAvatar ? { ...editingUser, avatar_url: '' } : editingUser} accessToken={accessToken} alt={editingUser ? `Foto de ${`${editingUser.first_name} ${editingUser.last_name}`.trim()}` : 'Foto del nuevo miembro'} className="h-14 w-14" />}
               <div className="min-w-0 flex-1">
-                <label className="inline-flex cursor-pointer rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Foto de perfil<input type="file" aria-label="Foto de perfil" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={(event) => { setAvatar(event.target.files?.[0] || null); setRemoveAvatar(false) }} /></label>
+                <label className="inline-flex cursor-pointer rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">Foto de perfil<input type="file" disabled={!uploads} aria-label="Foto de perfil" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={(event) => { setAvatar(event.target.files?.[0] || null); setRemoveAvatar(false) }} /></label>
                 <p className="mt-1 text-[11px] text-slate-400">PNG, JPEG o WebP · máximo 2 MB</p>
               </div>
               {isEditing && editingUser.avatar_url && !removeAvatar ? <button type="button" onClick={() => { setAvatar(null); setRemoveAvatar(true) }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">Quitar foto</button> : null}
@@ -231,12 +236,7 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
             </div>
           ) : null}
           {isEditing ? (
-            <>
-              <label className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 sm:col-span-2">
-                <input type="checkbox" name="is_active" checked={form.is_active} onChange={update} className="h-4 w-4 accent-blue-700" />
-                Usuario activo
-              </label>
-              <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 sm:col-span-2">
+            <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 sm:col-span-2">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-sm font-semibold text-slate-800">Acceso</p>
@@ -257,8 +257,7 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
                     </label>
                   </div>
                 ) : null}
-              </div>
-            </>
+            </div>
           ) : (
             <>
               <label className="grid gap-1.5 text-sm font-medium text-slate-700">Contraseña
@@ -280,6 +279,84 @@ function MemberForm({ onClose, onSaved, accessToken, editingUser }) {
   )
 }
 
+function ArchiveMemberDialog({ accessToken, member, onClose, onArchived }) {
+  const [archiving, setArchiving] = useState(false)
+  const [error, setError] = useState('')
+  const dialogRef = useRef(null)
+  const archivingRef = useRef(false)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => { onCloseRef.current = onClose }, [onClose])
+
+  useEffect(() => {
+    const previousFocus = document.activeElement
+    const dialog = dialogRef.current
+    const focusableSelector = 'button:not([disabled])'
+    dialog?.querySelector('[data-archive-cancel]')?.focus()
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape' && !archivingRef.current) {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !dialog) return
+      const focusable = [...dialog.querySelectorAll(focusableSelector)]
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable.at(-1)
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      if (previousFocus instanceof HTMLElement) previousFocus.focus()
+    }
+  }, [])
+
+  const confirmArchive = async () => {
+    archivingRef.current = true
+    setArchiving(true)
+    setError('')
+    try {
+      await updateUser(accessToken, member.id, { is_active: false })
+      onArchived(member)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      archivingRef.current = false
+      setArchiving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4" role="presentation">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="archive-member-title" aria-describedby="archive-member-description" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="grid h-11 w-11 place-items-center rounded-full bg-amber-50 text-xl text-amber-700" aria-hidden="true">↓</div>
+        <h2 id="archive-member-title" className="mt-4 font-serif text-2xl font-semibold text-slate-900">Archivar usuario</h2>
+        <p id="archive-member-description" className="mt-2 text-sm leading-6 text-slate-600">
+          ¿Quieres archivar a <strong className="text-slate-900">{userDisplayName(member)}</strong>?
+        </p>
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+          Este usuario dejará de poder iniciar sesión y no aparecerá en operaciones activas. Su historial se conservará.
+        </p>
+        {error ? <p role="alert" className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+        <div className="mt-6 flex justify-end gap-2">
+          <button data-archive-cancel type="button" disabled={archiving} onClick={onClose} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">Cancelar</button>
+          <button type="button" disabled={archiving} onClick={confirmArchive} className="rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60">{archiving ? 'Archivando…' : 'Confirmar archivo'}</button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { accessToken, user } = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -288,8 +365,14 @@ export default function SettingsPage() {
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [actionError, setActionError] = useState('')
   const [formOpen, setFormOpen] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
+  const [archivingUser, setArchivingUser] = useState(null)
+  const [reactivatingUserId, setReactivatingUserId] = useState(null)
+  const [staffStatus, setStaffStatus] = useState('active')
+  const [searchDraft, setSearchDraft] = useState('')
+  const [search, setSearch] = useState('')
   const visibleSettingsSections = settingsSections.filter(([, , , capability]) => (
     hasCapability(user, capability)
   ))
@@ -305,7 +388,11 @@ export default function SettingsPage() {
       return undefined
     }
     let active = true
-    listUsers(accessToken, page > 1 ? page : undefined)
+    setLoading(true)
+    setLoadError('')
+    const options = { status: staffStatus, search }
+    if (page > 1) options.page = page
+    listUsers(accessToken, options)
       .then((data) => {
         if (!active) return
         const loaded = normalizePage(data)
@@ -315,13 +402,15 @@ export default function SettingsPage() {
       .catch((error) => { if (active) setLoadError(error.message) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [accessToken, canManageUsers, page])
+  }, [accessToken, canManageUsers, page, search, staffStatus])
 
   const saveUser = (user) => {
     setUsers((current) => editingUser
       ? current.map((item) => item.id === user.id ? user : item)
-      : current.length < PAGE_SIZE ? [...current, user] : current)
-    if (!editingUser) setUserCount((current) => current + 1)
+      : staffStatus === 'active' && current.length < PAGE_SIZE ? [...current, user] : current)
+    if (!editingUser && staffStatus === 'active') {
+      setUserCount((current) => current + 1)
+    }
     setFormOpen(false)
     setEditingUser(null)
   }
@@ -334,6 +423,45 @@ export default function SettingsPage() {
   const openEditForm = (user) => {
     setEditingUser(user)
     setFormOpen(true)
+  }
+
+  const removeUserFromCurrentView = (changedUser) => {
+    setUsers((current) => current.filter((item) => item.id !== changedUser.id))
+    setUserCount((current) => Math.max(0, current - 1))
+    setArchivingUser(null)
+    if (users.length === 1 && page > 1) setPage((current) => current - 1)
+  }
+
+  const changeStaffStatus = (nextStatus) => {
+    setStaffStatus(nextStatus)
+    setPage(1)
+    setActionError('')
+  }
+
+  const submitSearch = (event) => {
+    event.preventDefault()
+    setSearch(searchDraft.trim())
+    setPage(1)
+    setActionError('')
+  }
+
+  const clearSearch = () => {
+    setSearchDraft('')
+    setSearch('')
+    setPage(1)
+  }
+
+  const reactivateUser = async (member) => {
+    setReactivatingUserId(member.id)
+    setActionError('')
+    try {
+      await updateUser(accessToken, member.id, { is_active: true })
+      removeUserFromCurrentView(member)
+    } catch (requestError) {
+      setActionError(requestError.message)
+    } finally {
+      setReactivatingUserId(null)
+    }
   }
 
   return (
@@ -363,26 +491,43 @@ export default function SettingsPage() {
             <button type="button" aria-label="Añadir miembro" onClick={openCreateForm} className="rounded-xl bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">＋ Añadir miembro</button>
           </div>
 
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div role="tablist" aria-label="Estado del personal" className="inline-flex self-start rounded-xl bg-slate-100 p-1">
+              {[
+                ['active', 'Activos'],
+                ['archived', 'Archivados'],
+              ].map(([value, label]) => (
+                <button key={value} type="button" role="tab" aria-selected={staffStatus === value} onClick={() => changeStaffStatus(value)} className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${staffStatus === value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>{label}</button>
+              ))}
+            </div>
+            <form role="search" onSubmit={submitSearch} className="flex w-full gap-2 sm:max-w-sm">
+              <input type="search" aria-label="Buscar personal" value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Nombre o correo" className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+              {search ? <button type="button" onClick={clearSearch} className="rounded-lg px-2 text-xs font-semibold text-slate-500 hover:bg-slate-100">Limpiar</button> : null}
+              <button type="submit" className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">Buscar</button>
+            </form>
+          </div>
+
           {loading ? <p className="p-8 text-center text-sm text-slate-500">Cargando miembros…</p> : null}
           {loadError ? <p role="alert" className="m-5 rounded-lg bg-red-50 p-3 text-sm text-red-700">{loadError}</p> : null}
+          {actionError ? <p role="alert" className="m-5 rounded-lg bg-red-50 p-3 text-sm text-red-700">{actionError}</p> : null}
           {!loading && !loadError && users.length === 0 ? (
             <div className="grid min-h-64 place-content-center px-6 py-12 text-center">
               <span aria-hidden="true" className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-blue-50 text-blue-700">♙</span>
-              <p className="text-sm font-semibold text-slate-700">Aún no hay miembros registrados.</p>
-              <p className="mt-1 text-xs text-slate-400">Añade al primer integrante del equipo.</p>
+              <p className="text-sm font-semibold text-slate-700">{staffStatus === 'active' ? 'No hay usuarios activos.' : 'No hay usuarios archivados.'}</p>
+              <p className="mt-1 text-xs text-slate-400">{search ? 'Prueba con otro nombre o correo.' : staffStatus === 'active' ? 'Añade un integrante o reactiva una cuenta archivada.' : 'Las cuentas archivadas aparecerán aquí.'}</p>
             </div>
           ) : null}
-          {!loading && users.length > 0 ? (
+          {!loading && !loadError && users.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[620px] text-left">
                 <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500"><tr><th className="px-5 py-3">Usuario</th><th className="px-5 py-3">Rol</th><th className="px-5 py-3">Estado</th><th className="px-5 py-3 text-right">Acciones</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
-                  {users.map((user) => (
-                    <tr key={user.id} className="hover:bg-slate-50">
-                      <td className="px-5 py-4"><div className="flex items-center gap-3"><AuthenticatedAvatar user={user} accessToken={accessToken} alt={`Foto de ${`${user.first_name} ${user.last_name}`.trim() || user.email}`} className="h-9 w-9" /><span><strong className="block text-sm text-slate-800">{`${user.first_name} ${user.last_name}`.trim() || user.email}</strong><small className="text-xs text-slate-500">{user.email}</small></span></div></td>
-                      <td className="px-5 py-4"><span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">{roleLabels[user.role] || user.role}</span></td>
-                      <td className="px-5 py-4"><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${user.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{user.is_active ? 'Activo' : 'Inactivo'}</span></td>
-                      <td className="px-5 py-4 text-right"><button type="button" onClick={() => openEditForm(user)} aria-label={`Editar a ${`${user.first_name} ${user.last_name}`.trim() || user.email}`} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:border-blue-200 hover:bg-blue-50">Editar</button></td>
+                  {users.map((member) => (
+                    <tr key={member.id} className="hover:bg-slate-50">
+                      <td className="px-5 py-4"><div className="flex items-center gap-3"><AuthenticatedAvatar user={member} accessToken={accessToken} alt={`Foto de ${userDisplayName(member)}`} className="h-9 w-9" /><span><strong className="block text-sm text-slate-800">{userDisplayName(member)}</strong><small className="text-xs text-slate-500">{member.email}</small></span></div></td>
+                      <td className="px-5 py-4"><span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700">{roleLabels[member.role] || member.role}</span></td>
+                      <td className="px-5 py-4"><span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${member.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{member.is_active ? 'Activo' : 'Archivado'}</span></td>
+                      <td className="px-5 py-4 text-right">{staffStatus === 'active' ? <div className="flex justify-end gap-2"><button type="button" onClick={() => openEditForm(member)} aria-label={`Editar a ${userDisplayName(member)}`} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:border-blue-200 hover:bg-blue-50">Editar</button>{member.id !== user.id ? <button type="button" onClick={() => setArchivingUser(member)} aria-label={`Archivar a ${userDisplayName(member)}`} className="rounded-lg border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-50">Archivar</button> : null}</div> : <button type="button" disabled={reactivatingUserId === member.id} onClick={() => reactivateUser(member)} aria-label={`Reactivar a ${userDisplayName(member)}`} className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60">{reactivatingUserId === member.id ? 'Reactivando…' : 'Reactivar'}</button>}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -398,6 +543,7 @@ export default function SettingsPage() {
         </Suspense>}
       </div>
       {formOpen ? <MemberForm onClose={() => setFormOpen(false)} onSaved={saveUser} accessToken={accessToken} editingUser={editingUser} /> : null}
+      {archivingUser ? <ArchiveMemberDialog accessToken={accessToken} member={archivingUser} onClose={() => setArchivingUser(null)} onArchived={removeUserFromCurrentView} /> : null}
     </div>
   )
 }

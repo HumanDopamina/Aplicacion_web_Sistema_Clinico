@@ -1,6 +1,16 @@
 from django.db import DatabaseError, connection
+from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
+
+
+@require_GET
+def features(request):
+    return JsonResponse({
+        "demo": settings.DEMO_MODE,
+        "uploads": settings.UPLOADS_ENABLED,
+        "password_reset": settings.PASSWORD_RESET_ENABLED,
+    })
 
 
 @require_GET

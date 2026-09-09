@@ -11,6 +11,7 @@ from django.db.models import F
 from django.utils.encoding import force_str
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.reverse import reverse
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
@@ -20,8 +21,11 @@ from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from apps.common.file_validation import validate_image_content
+from apps.common.features import require_uploads_enabled
+from apps.common.upload_cleanup import cleanup_created_uploads, save_tracked_upload
 
 from .models import RolePermissionPreset, User
+from .file_cleanup import schedule_file_deletion
 from .permissions import PERMISSION_CODES, get_effective_permissions, order_permissions
 
 
@@ -48,6 +52,7 @@ def protected_avatar_url(user, route_name, kwargs=None):
 
 
 def validate_avatar(uploaded_file):
+    require_uploads_enabled()
     extension = Path(uploaded_file.name).suffix.lower()
     content_type = getattr(uploaded_file, "content_type", "").lower()
     if (
@@ -77,13 +82,21 @@ class AvatarUpdateMixin:
 
     def update(self, instance, validated_data):
         remove_avatar = validated_data.pop("remove_avatar", False)
-        old_storage = instance.avatar.storage
         old_name = instance.avatar.name
         if remove_avatar:
             validated_data["avatar"] = ""
-        updated = super().update(instance, validated_data)
+        request = self.context.get("request", self)
+        try:
+            uploaded_file = validated_data.get("avatar")
+            if hasattr(uploaded_file, "read"):
+                save_tracked_upload(instance.avatar, uploaded_file, request)
+                validated_data["avatar"] = instance.avatar
+            updated = super().update(instance, validated_data)
+        except Exception:
+            cleanup_created_uploads(request)
+            raise
         if old_name and (remove_avatar or "avatar" in validated_data):
-            old_storage.delete(old_name)
+            schedule_file_deletion("avatar", old_name)
         return updated
 
 
@@ -200,7 +213,11 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
         self.user = user
         return attrs
 
+    @transaction.atomic
     def save(self, **kwargs):
+        self.user = User.objects.select_for_update().get(pk=self.user.pk)
+        if not self.user.is_active or not default_token_generator.check_token(self.user, self.validated_data["token"]):
+            raise serializers.ValidationError({"token": "El enlace no es válido o ha expirado."})
         self.user.set_password(self.validated_data["new_password"])
         self.user.token_version += 1
         self.user.save(update_fields=["password", "token_version"])
@@ -232,8 +249,14 @@ class ChangePasswordSerializer(serializers.Serializer):
             raise serializers.ValidationError({"new_password": exc.messages}) from exc
         return attrs
 
+    @transaction.atomic
     def save(self, **kwargs):
-        user = self.context["request"].user
+        previous = self.context["request"].user
+        user = User.objects.select_for_update().get(pk=previous.pk)
+        if not user.is_active or user.token_version != previous.token_version:
+            raise AuthenticationFailed("La sesión ya no es válida.")
+        if not user.check_password(self.validated_data["current_password"]):
+            raise serializers.ValidationError({"current_password": "La contraseña actual cambió."})
         user.set_password(self.validated_data["new_password"])
         user.token_version += 1
         user.save(update_fields=["password", "token_version"])
@@ -241,6 +264,13 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 
 class CurrentUserProfileSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        locked = User.objects.select_for_update().get(pk=instance.pk)
+        if not locked.is_active or locked.token_version != instance.token_version:
+            raise AuthenticationFailed("La sesión ya no es válida.")
+        return super().update(locked, validated_data)
+
     avatar_url = serializers.SerializerMethodField()
     remove_avatar = serializers.BooleanField(write_only=True, required=False, default=False)
     current_password = serializers.CharField(
@@ -360,7 +390,18 @@ class UserAdminSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop("confirm_password")
         validated_data.pop("remove_avatar", None)
-        return User.objects.create_user(**validated_data)
+        avatar = validated_data.pop("avatar", None)
+        request = self.context.get("request", self)
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(**validated_data)
+                if avatar:
+                    save_tracked_upload(user.avatar, avatar, request)
+                    user.save(update_fields=["avatar"])
+                return user
+        except Exception:
+            cleanup_created_uploads(request)
+            raise
 
 
 class UserAdminUpdateSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
@@ -408,6 +449,15 @@ class UserAdminUpdateSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
         return email
 
     def validate(self, attrs):
+        request = self.context.get("request")
+        if (
+            attrs.get("is_active") is False
+            and request is not None
+            and self.instance.pk == request.user.pk
+        ):
+            raise serializers.ValidationError({
+                "is_active": "No puedes archivar tu propia cuenta.",
+            })
         has_new_password = "new_password" in attrs
         has_confirmation = "confirm_password" in attrs
         if has_new_password != has_confirmation:
@@ -429,15 +479,33 @@ class UserAdminUpdateSerializer(AvatarUpdateMixin, serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance, validated_data):
+        # Serialize administrator changes before locking the target account.
+        list(User.objects.select_for_update().filter(
+            role=User.Role.ADMINISTRADOR, is_active=True,
+        ).order_by("pk").values_list("pk", flat=True))
+        instance = User.objects.select_for_update().get(pk=instance.pk)
+        loses_admin = (
+            instance.role == User.Role.ADMINISTRADOR and instance.is_active
+            and (validated_data.get("is_active") is False
+                 or validated_data.get("role", instance.role) != User.Role.ADMINISTRADOR)
+        )
+        if loses_admin and not User.objects.filter(
+            role=User.Role.ADMINISTRADOR, is_active=True,
+        ).exclude(pk=instance.pk).exists():
+            raise serializers.ValidationError({"role": "Debe quedar al menos un administrador activo."})
+        revoke_tokens = (
+            instance.is_active != validated_data.get("is_active", instance.is_active)
+            or instance.role != validated_data.get("role", instance.role)
+        )
         new_password = validated_data.pop("new_password", None)
         validated_data.pop("confirm_password", None)
         updated = super().update(instance, validated_data)
-        if new_password is not None:
-            updated.set_password(new_password)
-            type(updated).objects.filter(pk=updated.pk).update(
-                password=updated.password,
-                token_version=F("token_version") + 1,
-            )
+        if new_password is not None or revoke_tokens:
+            changes = {"token_version": F("token_version") + 1}
+            if new_password is not None:
+                updated.set_password(new_password)
+                changes["password"] = updated.password
+            type(updated).objects.filter(pk=updated.pk).update(**changes)
             updated.refresh_from_db(fields=["password", "token_version"])
         return updated
 

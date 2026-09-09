@@ -10,7 +10,7 @@
 - Los archivos se almacenan privadamente con UUID y sólo se entregan mediante un endpoint autenticado y acotado al paciente.
 - Búsqueda, filtros y sugerencias de categoría funcionan sin duplicados por diferencias de espacios o mayúsculas.
 - Imagen y PDF se previsualizan desde blobs autenticados; también pueden descargarse con su nombre original.
-- `documents.delete` habilita una confirmación explícita para borrar registro y archivo sin recuperación.
+- `documents.delete` habilita el retiro lógico con motivo obligatorio. Se conserva el archivo; Administración puede listar retirados y restaurarlos desde la interfaz.
 - Los expedientes inactivos conservan consulta y descarga en modo de sólo lectura.
 - La interfaz incluye tabla de escritorio, tarjetas móviles, estados vacío/error/carga y modales centrados accesibles.
 
@@ -28,3 +28,9 @@
 - `GET /api/patients/document-categories/`
 
 Evidencia visual: [lista de escritorio](assets/patient-documents-desktop.png), [preview autenticado](assets/patient-documents-preview.png) y [tarjetas móviles](assets/patient-documents-mobile.png).
+
+## Revisión de seguridad — septiembre de 2026
+
+Se valida la estructura de PDF, se recodifican imágenes, se limpian cargas al revertir y se evita la filtración de metadatos en exportaciones sin permiso. Regresión: `python manage.py test apps.patients.test_documents apps.patients.test_production_safety apps.common.test_file_safety --settings=config.settings.test`. Frontend: `npm test -- src/pages/Patients/PatientDocumentsPage.test.jsx`.
+
+El alcance y los pendientes de producción están en [el informe de correcciones](../production-readiness-improvements.md).

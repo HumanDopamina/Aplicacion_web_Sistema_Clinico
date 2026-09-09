@@ -44,10 +44,10 @@ const jsonResponse = (data, status = 200) => ({
   headers: { get: () => null },
 })
 
-function renderPage({ permissions = ['patients.view', 'documents.view', 'documents.create'] } = {}) {
+function renderPage({ role = 'ODONTOLOGO', permissions = ['patients.view', 'documents.view', 'documents.create'] } = {}) {
   const initialSession = {
     access: 'access-token', refresh: 'refresh-token',
-    user: { email: 'clinico@example.com', first_name: 'Elena', role: 'ODONTOLOGO', permissions },
+    user: { email: 'clinico@example.com', first_name: 'Elena', role, permissions },
   }
   const router = createMemoryRouter([{
     path: '*', element: <AuthProvider initialSession={initialSession}><App /></AuthProvider>,
@@ -69,6 +69,23 @@ function baseFetch({ documents = [document], active = true, consultations = cons
 }
 
 describe('patient documents page', () => {
+  it('lets an administrator find and restore a retired document', async () => {
+    let restored = false
+    const fetchMock = vi.fn((url, options = {}) => {
+      if (url.includes('/restore/') && options.method === 'POST') {
+        restored = true
+        return Promise.resolve(jsonResponse(document))
+      }
+      if (url.includes('retired=true')) return Promise.resolve(jsonResponse(restored ? [] : [document]))
+      return baseFetch()(url, options)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage({ role: 'ADMINISTRADOR' })
+    fireEvent.click(await screen.findByLabelText('Mostrar documentos retirados'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Restaurar' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Restaurar' })).not.toBeInTheDocument())
+    expect(restored).toBe(true)
+  })
   beforeEach(() => {
     localStorage.clear()
     sessionStorage.clear()
@@ -164,7 +181,10 @@ describe('patient documents page', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Ver radiografia-panoramica\.pdf/ }))
     const dialog = await screen.findByRole('dialog', { name: 'Detalle del documento' })
     expect(within(dialog).getByTitle('Vista previa de radiografia-panoramica.pdf')).toHaveAttribute('src', 'blob:preview')
-    expect(within(dialog).getByRole('button', { name: 'Eliminar documento' })).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Retirar documento' }))
+    expect(within(dialog).getByRole('button', { name: 'Sí, retirar' })).toBeDisabled()
+    fireEvent.change(within(dialog).getByLabelText('Motivo del retiro'), { target: { value: 'Duplicado' } })
+    expect(within(dialog).getByRole('button', { name: 'Sí, retirar' })).toBeEnabled()
   })
 
   it('makes an inactive patient visibly read-only', async () => {

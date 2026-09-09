@@ -387,14 +387,14 @@ describe('patientService', () => {
 
   it('loads authenticated content and deletes within the patient scope', () => {
     getPatientDocumentContent('token', 7, 4, true)
-    deletePatientDocument('token', 7, 4)
+    deletePatientDocument('token', 7, 4, 'Duplicado')
 
     expect(apiBlobRequest).toHaveBeenCalledWith(
       '/api/patients/7/documents/4/content/?download=true',
       { headers: { Authorization: 'Bearer token' } },
     )
     expect(apiRequest).toHaveBeenCalledWith('/api/patients/7/documents/4/', {
-      method: 'DELETE', headers: { Authorization: 'Bearer token' },
+      method: 'DELETE', body: JSON.stringify({ reason: 'Duplicado' }), headers: { Authorization: 'Bearer token' },
     })
   })
 })

@@ -2,6 +2,8 @@
 
 Aplicación web para la gestión de una clínica odontológica. El proyecto utiliza una API REST en Django y una interfaz en React, organizadas dentro de `src/`.
 
+Preparación de demo y correcciones de seguridad: consulta la [guía de Vercel + Render](docs/demo-deployment.md) y el [informe de cambios y pendientes](docs/production-readiness-improvements.md). La demo utiliza datos ficticios y no habilita cargas. La validación automatizada local no sustituye las pruebas en PostgreSQL ni la verificación del despliegue real.
+
 Actualmente están implementados los flujos de autenticación y seguridad de la cuenta:
 
 - Inicio de sesión con correo y contraseña.
@@ -19,6 +21,8 @@ Actualmente están implementados los flujos de autenticación y seguridad de la 
 - Odontogramas FDI por consulta con revisiones inmutables y comparación histórica por paciente.
 - Sesiones de ocho horas con refresh JWT en cookie `HttpOnly`, CSRF y access token sólo en memoria.
 - Protección de login por cuenta e IP y auditoría append-only de operaciones clínicas y administrativas.
+- Edición clínica con control de versión, retiro recuperable de documentos y revocación de sesiones al archivar usuarios.
+- Modo demo con muestras ficticias, cargas deshabilitadas y configuración separada de producción.
 
 ## Tecnologías
 
@@ -82,7 +86,7 @@ Desde la raíz del proyecto:
 cd src/backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 $env:DATABASE_URL = "postgresql://clinica_user:<contraseña-codificada>@localhost:5432/clinica_dental"
 python manage.py check
 python manage.py migrate
@@ -97,8 +101,8 @@ CREATE DATABASE clinica_dental OWNER clinica_user;
 
 `DATABASE_URL` es obligatoria en desarrollo y debe apuntar a PostgreSQL. Si la
 contraseña contiene caracteres reservados para una URL, debe codificarse. El
-proyecto no carga archivos `.env` automáticamente, por lo que la variable debe
-exportarse al proceso o suministrarse mediante un gestor de secretos local. La
+perfil de desarrollo carga `src/backend/.env` sin reemplazar variables ya exportadas.
+Los perfiles demo y producción reciben las variables del entorno de despliegue. La
 plantilla `src/backend/.env.example` documenta el perfil de producción.
 
 En Linux o macOS, activa el entorno con:
@@ -160,16 +164,17 @@ http://localhost:5173/
 
 ## Variables de entorno
 
-El frontend utiliza la siguiente variable. Es opcional sólo en desarrollo y
-obligatoria al construir/configurar una publicación productiva:
+El frontend utiliza la siguiente variable. En una publicación normal debe
+apuntar al origen HTTPS de la API; en la demo Vercel + Render se configura como
+`/` para que el proxy de Vercel mantenga frontend y API bajo el mismo origen:
 
 ```text
 VITE_API_URL=http://localhost:8000
 ```
 
 En desarrollo, si se omite, el frontend reutiliza automáticamente el hostname
-con el que fue abierto y usa el puerto `8000`. En producción falla de forma
-explícita si no se configuró `VITE_API_URL`. No mezcles `localhost` con
+con el que fue abierto y usa el puerto `8000`. Un build de producción falla de
+forma explícita si no se configura esta variable. No mezcles `localhost` con
 `127.0.0.1`: las cookies CSRF y de sesión deben pertenecer al mismo sitio.
 
 En desarrollo, el backend reconoce:
@@ -198,11 +203,12 @@ CREATE DATABASE clinic_test OWNER clinic_test;
 
 ```powershell
 $env:TEST_DATABASE_URL='postgresql://clinic_test:<contraseña-sintética-local>@127.0.0.1:5432/clinic_test'
-python manage.py test apps.appointments --settings=config.settings.postgres_test --noinput
+python manage.py test --settings=config.settings.postgres_test --noinput
 ```
 
-`config.settings.postgres_test` rechaza SQLite y también rechaza explícitamente
-`clinica_dental`, evitando que las pruebas destructivas apunten a desarrollo.
+`config.settings.postgres_test` ejecuta toda la suite con PostgreSQL, rechaza
+SQLite y también rechaza explícitamente `clinica_dental`, evitando que las
+pruebas destructivas apunten a desarrollo.
 
 En el entorno de desarrollo, los correos no se envían a una bandeja real: su contenido y el enlace de recuperación aparecen en la terminal del backend.
 
@@ -217,6 +223,7 @@ Los siguientes eventos invalidan las sesiones anteriores:
 - Cierre de sesión.
 - Restablecimiento de contraseña.
 - Cambio de contraseña desde una sesión autenticada.
+- Archivo, reactivación o cambio de rol de una cuenta por Administración.
 
 Los enlaces de recuperación:
 
@@ -237,9 +244,9 @@ No se guardan JWT en `localStorage` ni `sessionStorage`. La decisión y sus cons
 | `GET` | `/api/auth/me/` | Sí | Devuelve el usuario autenticado. |
 | `PATCH` | `/api/auth/me/` | Sí | Actualiza nombre, apellidos, teléfono, correo y foto del usuario autenticado. |
 | `GET` | `/api/auth/me/avatar/` | Propietario | Sirve la foto privada del usuario autenticado. |
-| `POST` | `/api/auth/logout/` | Access + cookie + CSRF | Revoca la sesión, limpia la cookie y devuelve `204`. |
-| `POST` | `/api/auth/password-reset/` | No | Solicita el enlace de recuperación. |
-| `POST` | `/api/auth/password-reset/confirm/` | No | Confirma una nueva contraseña con uid y token. |
+| `POST` | `/api/auth/logout/` | Cookie refresh + CSRF; access opcional | Revoca la sesión, incluso con access vencido, limpia la cookie y devuelve `204`. |
+| `POST` | `/api/auth/password-reset/` | No | Solicita el enlace de recuperación; se deshabilita en demo. |
+| `POST` | `/api/auth/password-reset/confirm/` | No | Confirma una nueva contraseña con uid y token; se deshabilita en demo. |
 | `POST` | `/api/auth/password-change/` | Sí | Cambia la contraseña del usuario autenticado. |
 | `GET` | `/api/auth/users/` | Administrador | Lista los usuarios registrados. |
 | `POST` | `/api/auth/users/` | Administrador | Registra un usuario con sus credenciales y rol. |
@@ -247,6 +254,20 @@ No se guardan JWT en `localStorage` ni `sessionStorage`. La decisión y sus cons
 | `GET` | `/api/auth/users/{id}/avatar/` | Propietario o administrador | Sirve una foto de perfil desde almacenamiento privado. |
 | `GET` | `/api/auth/role-permissions/` | Administrador | Lista el catálogo y los presets editables por rol. |
 | `PATCH` | `/api/auth/role-permissions/{role}/` | Administrador | Reemplaza el preset global de un rol editable. |
+
+## Edición concurrente y documentos clínicos
+
+Los `PATCH` de paciente, consulta y procedimiento reciben el
+`expected_version` devuelto por su lectura. En demo y producción es obligatorio:
+la API responde `400` si falta y `409` con código `edit_conflict` si otra persona
+guardó antes. La interfaz conserva el borrador para que el profesional decida
+cómo reconciliarlo; no reemplaza cambios de forma silenciosa.
+
+Los documentos se retiran con `DELETE /api/patients/{patient}/documents/{id}/`
+y un cuerpo `{"reason":"motivo"}`. El retiro conserva archivo, fecha, actor y
+motivo. Solo Administración puede consultar retirados con `?retired=true` y
+restaurarlos mediante `POST .../documents/{id}/restore/`. No existe una purga
+física de documentos clínicos.
 
 ## Endpoints de pacientes
 
@@ -298,7 +319,11 @@ npm run lint
 npm run build
 ```
 
-CI ejecuta estas comprobaciones, valida que no falten migraciones, aplica las migraciones desde cero y corre `check --deploy` con configuración productiva sintética. Un job separado levanta PostgreSQL 18 con credenciales efímeras y ejecuta las pruebas de constraints, migración, respuestas 409 y concurrencia de citas y transiciones clínicas.
+CI ejecuta estas comprobaciones, audita dependencias Python y npm, valida que no
+falten migraciones, aplica las migraciones desde cero y corre `check --deploy`
+con configuración productiva sintética. Un job separado levanta PostgreSQL 18
+con credenciales efímeras y ejecuta la suite completa, incluidas constraints,
+migraciones, respuestas `409` y concurrencia de citas y transiciones clínicas.
 
 ## Auditoría
 
@@ -381,9 +406,9 @@ Cada nueva consulta hereda el odontograma más reciente del paciente. Las versio
 1. Abre un expediente y selecciona **Documentos**.
 2. Busca por nombre, notas o categoría, o filtra usando las categorías normalizadas que ya utiliza la clínica.
 3. Selecciona **Adjuntar documentos** para cargar hasta 10 archivos PDF, JPG, PNG o WebP con categoría, fecha y notas comunes.
-4. Abre un documento para previsualizarlo de forma autenticada, descargarlo con su nombre original o eliminarlo si tu rol tiene `documents.delete`.
+4. Abre un documento para previsualizarlo de forma autenticada, descargarlo con su nombre original o retirarlo indicando un motivo si tu rol tiene `documents.delete`.
 
-Los archivos se guardan fuera del directorio público con nombres UUID; la API nunca expone su ruta física. Cada archivo admite hasta 10 MB y cada lote hasta 50 MB. Recepción y Odontología obtienen `documents.view` y `documents.create` por defecto; el borrado físico no se asigna por defecto, requiere confirmación y no puede recuperarse. Un paciente inactivo conserva vista previa y descarga, pero su archivo clínico pasa a modo de solo lectura. Consulta la operación y el contrato completo en [`docs/patient-documents.md`](docs/patient-documents.md).
+Los archivos se guardan fuera del directorio público con nombres UUID; la API nunca expone su ruta física. Cada archivo admite hasta 10 MB y cada lote hasta 50 MB. Recepción y Odontología obtienen `documents.view` y `documents.create` por defecto. El retiro es lógico, requiere motivo y deja el archivo recuperable; Administración puede listar los retirados y restaurarlos. Un paciente inactivo conserva vista previa y descarga, pero su archivo clínico pasa a modo de solo lectura. La demo deshabilita nuevas cargas. Consulta la operación y el contrato completo en [`docs/patient-documents.md`](docs/patient-documents.md).
 
 ### Agenda de citas
 
@@ -410,8 +435,24 @@ Antes de desplegar el sistema:
 - Configurar HTTPS y cabeceras de seguridad.
 - Verificar respaldo, restauración y operación de PostgreSQL en el entorno de despliegue.
 - Configurar un servicio SMTP o transaccional.
-- Evaluar cookies `HttpOnly` para almacenar las credenciales de sesión.
+- Verificar las cookies `HttpOnly`, `Secure` y CSRF de las sesiones en el dominio real.
 - Ejecutar auditorías de dependencias y seguridad.
+
+### Demo en Vercel + Render
+
+La demostración usa `config.settings.demo`, PostgreSQL y Redis separados, datos
+ficticios y el proxy `/api/` de Vercel hacia Render. Las cargas de archivos y la
+recuperación por correo están deshabilitadas. Sigue la
+[guía de despliegue de demo](docs/demo-deployment.md) para configurar secretos,
+migraciones, datos de muestra y las comprobaciones posteriores al despliegue.
+No se han creado servicios externos ni se ha publicado la demo desde este
+repositorio.
+
+Para datos reales, consulta además el
+[informe de cambios y pendientes](docs/production-readiness-improvements.md):
+faltan controles operativos como respaldos y restauraciones probadas,
+antimalware/cuarentena de archivos, tareas periódicas, MFA y pruebas de carga
+en un entorno de staging.
 
 Esta lista es solamente un resumen. La salida con datos clínicos reales requiere
 cerrar todas las puertas P0 y adjuntar la evidencia definida en la guía de

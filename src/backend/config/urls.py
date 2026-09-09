@@ -22,6 +22,7 @@ from django.urls import include, path
 from . import health
 
 urlpatterns = [
+    path('api/system/features/', health.features, name='system-features'),
     path('health/live/', health.live, name='health-live'),
     path('health/ready/', health.ready, name='health-ready'),
     path('api/auth/', include('apps.users.urls', namespace='users')),

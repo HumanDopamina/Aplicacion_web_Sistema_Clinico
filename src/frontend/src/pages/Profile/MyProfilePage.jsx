@@ -1,3 +1,4 @@
+import { useSystemFeatures } from '../../context/systemFeaturesValue'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import AuthenticatedAvatar from '../../components/AuthenticatedAvatar'
@@ -13,6 +14,7 @@ const roleLabels = {
 const emptyForm = { first_name: '', last_name: '', phone: '', email: '', current_password: '' }
 
 export default function MyProfilePage() {
+  const { uploads } = useSystemFeatures()
   const { accessToken, updateUser } = useAuth()
   const [profile, setProfile] = useState(null)
   const [form, setForm] = useState(emptyForm)
@@ -142,7 +144,7 @@ export default function MyProfilePage() {
             ) : null}
             <label className="mt-6 w-full cursor-pointer rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">
               Seleccionar foto
-              <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" aria-label="Seleccionar foto" onChange={chooseAvatar} />
+              <input className="sr-only" type="file" disabled={!uploads} accept="image/png,image/jpeg,image/webp" aria-label="Seleccionar foto" onChange={chooseAvatar} />
             </label>
             {(profile.avatar_url || avatar) && !removeAvatar ? <button type="button" onClick={removePhoto} className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-white">Quitar foto</button> : null}
             <p className="mt-3 text-xs leading-5 text-slate-400">PNG, JPEG o WebP · máximo 2 MB</p>

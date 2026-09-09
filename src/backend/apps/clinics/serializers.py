@@ -5,6 +5,9 @@ from django.db import transaction
 from rest_framework import serializers
 
 from apps.common.file_validation import validate_image_content
+from apps.common.features import require_uploads_enabled
+from apps.users.file_cleanup import schedule_file_deletion
+from apps.common.upload_cleanup import cleanup_created_uploads, save_tracked_upload
 
 from .models import (
     BusinessBreak,
@@ -37,6 +40,7 @@ class ClinicProfileSerializer(serializers.ModelSerializer):
         return request.build_absolute_uri(profile.logo.url) if request else profile.logo.url
 
     def validate_logo(self, logo):
+        require_uploads_enabled()
         if logo.size > 2 * 1024 * 1024:
             raise serializers.ValidationError("El logo no puede superar 2 MB.")
         if getattr(logo, "content_type", "") not in ("image/png", "image/jpeg", "image/webp"):
@@ -63,10 +67,22 @@ class ClinicProfileSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         remove_logo = validated_data.pop("remove_logo", False)
-        if remove_logo and instance.logo:
-            instance.logo.delete(save=False)
-            instance.logo = ""
-        return super().update(instance, validated_data)
+        old_name = instance.logo.name
+        if remove_logo:
+            validated_data["logo"] = ""
+        request = self.context.get("request", self)
+        try:
+            uploaded_file = validated_data.get("logo")
+            if hasattr(uploaded_file, "read"):
+                save_tracked_upload(instance.logo, uploaded_file, request)
+                validated_data["logo"] = instance.logo
+            updated = super().update(instance, validated_data)
+        except Exception:
+            cleanup_created_uploads(request)
+            raise
+        if old_name and (remove_logo or "logo" in validated_data):
+            schedule_file_deletion("logo", old_name)
+        return updated
 
 
 class BusinessBreakSerializer(serializers.Serializer):

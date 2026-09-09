@@ -1,4 +1,5 @@
 export function resolveApiUrl({ configured, isDevelopment, location }) {
+  if (configured?.trim() === '/') return ''
   const explicitUrl = configured?.trim().replace(/\/+$/, '')
   if (explicitUrl) return explicitUrl
   if (!isDevelopment) {

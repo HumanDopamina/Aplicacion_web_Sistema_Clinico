@@ -212,7 +212,9 @@ export default function ConsultationRecordPage({ isNew = false }) {
       const payload = consultationPayload(form)
       const saved = isNew
         ? await createPatientConsultation(accessToken, patientId, payload)
-        : await updatePatientConsultation(accessToken, patientId, consultationId, payload)
+        : await updatePatientConsultation(accessToken, patientId, consultationId, {
+          ...payload, expected_version: consultation.version,
+        })
       const savedForm = consultationToForm(saved)
       setConsultation(saved)
       setForm(savedForm)

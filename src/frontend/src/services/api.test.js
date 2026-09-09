@@ -19,6 +19,9 @@ const response = ({ status = 200, data = {}, blob = null, headers = {} } = {}) =
 })
 
 describe('API session renewal', () => {
+  it('supports a same-origin production API through the reverse proxy', () => {
+    expect(apiModule.resolveApiUrl({ configured: '/', isDevelopment: false })).toBe('')
+  })
   beforeEach(() => {
     clearAccessToken()
     document.cookie = 'csrftoken=csrf-test; path=/'

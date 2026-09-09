@@ -1,3 +1,4 @@
+import { useSystemFeatures } from '../../context/systemFeaturesValue'
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import logo from '../../assets/logo_login.svg'
@@ -7,6 +8,7 @@ import { useAuth } from '../../context/authContextValue'
 import { login } from '../../services/authService'
 
 export default function LoginPage() {
+  const { password_reset: passwordResetEnabled } = useSystemFeatures()
   const [form, setForm] = useState({ email: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -34,9 +36,9 @@ export default function LoginPage() {
       <section className="grid min-w-0 flex-1 place-items-center px-5 py-10 sm:px-8">
           <form onSubmit={submit} className="flex flex-col w-[min(100%,390px)]" noValidate>
             <img src={logo} width="560" height="144" className="mb-2 h-auto w-[210px] self-center" alt="DentalClinic" />
-            <p className="self-center text-[#888] text-sm mb-8">Sistema de Gestión Odontológica</p>
+            <p className="self-center text-slate-600 text-sm mb-8">Sistema de Gestión Odontológica</p>
             <h1 className="m-0 text-[25px] font-medium">Bienvenido</h1>
-            <p className="mt-1 mb-6 text-[#888] text-sm">Ingresa tus credenciales para acceder</p>
+            <p className="mt-1 mb-6 text-slate-600 text-sm">Ingresa tus credenciales para acceder</p>
             {notice ? <div role="status" className="bg-[#eefaf4] text-[#17603e] px-3 py-2.5 mb-3.5 rounded-md text-sm">{notice}</div> : null}
             {error && <div role="alert" className="bg-[#fff0f0] text-[#a51d1d] px-3 py-2.5 mb-3.5 rounded-md text-sm">{error}</div>}
             <label htmlFor="email" className="text-sm font-bold mb-1.5">Correo electrónico</label>
@@ -44,7 +46,7 @@ export default function LoginPage() {
             <label htmlFor="password" className="text-sm font-bold mb-1.5">Contraseña</label>
             <input id="password" name="password" type="password" value={form.password} onChange={change} placeholder="Tu contraseña…" autoComplete="current-password" className="mb-4 rounded-lg border border-slate-300 px-3 py-3 text-sm outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
             <div className="flex justify-end items-center mb-10 text-xs">
-              <Link to="/recuperar-contrasena" className="text-[#252525] no-underline font-semibold">¿Has olvidado tu contraseña?</Link>
+              {passwordResetEnabled ? <Link to="/recuperar-contrasena" className="text-[#252525] no-underline font-semibold">¿Has olvidado tu contraseña?</Link> : <p>Para cambiar tu contraseña, contacta al administrador de la demo.</p>}
             </div>
             <CustomButton type="submit" disabled={loading}>{loading ? 'Iniciando sesión…' : 'Iniciar sesión'}</CustomButton>
           </form>

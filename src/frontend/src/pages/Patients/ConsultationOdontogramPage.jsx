@@ -126,7 +126,8 @@ export default function ConsultationOdontogramPage() {
   const [conflict, setConflict] = useState(false)
   const [plannedItems, setPlannedItems] = useState([])
   const [plannedOverlayError, setPlannedOverlayError] = useState('')
-  const canModify = user.role === 'ADMINISTRADOR' || user.permissions?.includes('consultations.edit')
+  const canModify = consultation?.status === 'EN_PROGRESO' && patient?.is_active !== false
+    && (user.role === 'ADMINISTRADOR' || user.permissions?.includes('consultations.edit'))
 
   const load = useCallback(async () => {
     setLoading(true)

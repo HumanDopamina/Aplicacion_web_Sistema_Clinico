@@ -6,6 +6,7 @@ import time
 import uuid
 
 from django.db import transaction
+from apps.common.upload_cleanup import cleanup_created_uploads
 
 from .models import AuditEvent
 
@@ -65,7 +66,7 @@ class RequestIdMiddleware:
 
 
 class AuditTrailMiddleware:
-    EXCLUDED_PREFIXES = ("/api/auth/csrf/",)
+    EXCLUDED_PREFIXES = ("/api/auth/csrf/", "/api/system/features/")
     ACTIONS = {
         "login": "AUTH_LOGIN",
         "token-refresh": "AUTH_REFRESH",
@@ -94,10 +95,19 @@ class AuditTrailMiddleware:
             return self.get_response(request)
         self._capture_safe_request_details(request)
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-            with transaction.atomic():
-                response = self.get_response(request)
-                self._record(request, response)
-                return response
+            try:
+                with transaction.atomic():
+                    with transaction.atomic():
+                        response = self.get_response(request)
+                        if response.status_code >= 400:
+                            transaction.set_rollback(True)
+                    self._record(request, response)
+            except Exception:
+                cleanup_created_uploads(request)
+                raise
+            if response.status_code >= 400:
+                cleanup_created_uploads(request)
+            return response
         response = self.get_response(request)
         self._record(request, response)
         return response

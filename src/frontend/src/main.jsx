@@ -5,11 +5,12 @@ import './index.css'
 import App from './App.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 import { ClinicProvider } from './context/ClinicContext.jsx'
+import SystemFeaturesProvider from './context/SystemFeaturesProvider.jsx'
 
 const router = createBrowserRouter([{ path: '*', element: <App /> }])
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <AuthProvider><ClinicProvider><RouterProvider router={router} /></ClinicProvider></AuthProvider>
+    <SystemFeaturesProvider><AuthProvider><ClinicProvider><RouterProvider router={router} /></ClinicProvider></AuthProvider></SystemFeaturesProvider>
   </StrictMode>,
 )

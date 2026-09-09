@@ -9,6 +9,8 @@ from rest_framework.exceptions import PermissionDenied
 from apps.clinics.availability import clinic_today
 from apps.clinics.models import ClinicService
 from apps.users.permissions import user_has_permission
+from apps.common.versioning import VersionedSerializer
+from apps.common.upload_cleanup import cleanup_created_uploads, save_tracked_upload
 
 from .documents import (
     MAX_BATCH_FILES,
@@ -132,7 +134,7 @@ class PossiblePatientDuplicateSerializer(serializers.Serializer):
         return super().to_representation(instance)
 
 
-class PatientDetailSerializer(PatientProfileSerializationMixin, serializers.ModelSerializer):
+class PatientDetailSerializer(PatientProfileSerializationMixin, VersionedSerializer):
     full_name = serializers.CharField(read_only=True)
     clinical_record = ClinicalRecordSerializer(required=False)
     profile_complete = serializers.SerializerMethodField()
@@ -173,6 +175,7 @@ class PatientDetailSerializer(PatientProfileSerializationMixin, serializers.Mode
             "profile_complete",
             "missing_profile_fields",
             "clinical_record",
+            "version", "expected_version",
             "registered_by",
             "created_at",
             "updated_at",
@@ -319,6 +322,10 @@ class PatientDetailSerializer(PatientProfileSerializationMixin, serializers.Mode
         )
         try:
             with transaction.atomic():
+                locked = Patient.objects.select_for_update().get(pk=instance.pk)
+                self.check_version(locked, validated_data)
+                instance = locked
+                self.instance = instance
                 patient = super().update(instance, validated_data)
                 if record_data is not None:
                     record, _ = ClinicalRecord.objects.get_or_create(patient=patient)
@@ -341,7 +348,7 @@ class PatientDetailSerializer(PatientProfileSerializationMixin, serializers.Mode
             raise
 
 
-class ConsultationSerializer(serializers.ModelSerializer):
+class ConsultationSerializer(VersionedSerializer):
     consultation_type_display = serializers.CharField(
         source="get_consultation_type_display",
         read_only=True,
@@ -365,6 +372,7 @@ class ConsultationSerializer(serializers.ModelSerializer):
         model = Consultation
         fields = (
             "id", "patient", "professional", "professional_name",
+            "version", "expected_version",
             "professional_specialty", "professional_registration_number", "completed_at",
             "completed_by", "completed_by_name", "date", "time",
             "consultation_type", "consultation_type_display", "summary", "status",
@@ -403,6 +411,7 @@ class ConsultationSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, attrs):
+        attrs = super().validate(attrs)
         instance = self.instance
         requested_status = attrs.get("status")
         if instance is None and requested_status != Consultation.Status.IN_PROGRESS:
@@ -427,6 +436,16 @@ class ConsultationSerializer(serializers.ModelSerializer):
             consultation = super().create(validated_data)
             create_initial_odontogram_version(consultation)
             return consultation
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        locked = Consultation.objects.select_for_update().get(pk=instance.pk)
+        # Check the clinical state before reporting a revision conflict.
+        if locked.status != Consultation.Status.IN_PROGRESS:
+            raise serializers.ValidationError("La consulta cerrada es de solo lectura.")
+        self.check_version(locked, validated_data)
+        self.instance = locked
+        return super().update(self.instance, validated_data)
 
 
 class TreatmentItemServiceSerializer(serializers.ModelSerializer):
@@ -503,7 +522,7 @@ class LongitudinalTreatmentItemSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class TreatmentItemSerializer(serializers.ModelSerializer):
+class TreatmentItemSerializer(VersionedSerializer):
     service = TreatmentItemServiceSerializer(read_only=True)
     service_id = serializers.PrimaryKeyRelatedField(
         source="service",
@@ -518,6 +537,7 @@ class TreatmentItemSerializer(serializers.ModelSerializer):
         model = TreatmentItem
         fields = (
             "id", "proposed_in", "service", "service_id", "description",
+            "version", "expected_version",
             "diagnosis_text", "tooth_code", "surfaces", "planned_finding",
             "status", "status_display", "unit_price_snapshot", "notes",
             "performed_in", "performed_at", "status_reason", "created_at", "updated_at",
@@ -535,6 +555,7 @@ class TreatmentItemSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
+        attrs = super().validate(attrs)
         protected = {}
         for field in (
             "proposed_in",
@@ -621,6 +642,31 @@ class TreatmentItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(error.message_dict) from error
         attrs["tooth_code"] = candidate.tooth_code
         return attrs
+
+    def _lock_consultation(self):
+        self.context["consultation"] = Consultation.objects.select_for_update().get(
+            pk=self.context["consultation"].pk,
+        )
+
+    @transaction.atomic
+    def create(self, validated_data):
+        self._lock_consultation()
+        validated_data = self.validate(validated_data)
+        return super().create(validated_data)
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        # Same lock order as treatment transitions: item, consultation, patient.
+        locked = TreatmentItem.objects.select_for_update().get(pk=instance.pk)
+        self._lock_consultation()
+        # Revalidate against current state, then consume expected_version.
+        previous = self.instance
+        self.instance = locked
+        validated_data = self.validate(validated_data)
+        self.instance = previous
+        self.check_version(locked, validated_data)
+        self.instance = locked
+        return super().update(self.instance, validated_data)
 
 
 class TreatmentOdontogramResultSerializer(serializers.Serializer):
@@ -792,11 +838,14 @@ class PatientDocumentSerializer(serializers.ModelSerializer):
         )
 
     def can_view_clinical_context(self):
+        if hasattr(self, "_can_view_clinical_context"):
+            return self._can_view_clinical_context
         request = self.context.get("request")
-        return bool(
+        self._can_view_clinical_context = bool(
             request
             and user_has_permission(request.user, "consultations.view")
         )
+        return self._can_view_clinical_context
 
     def get_consultation(self, document):
         if not self.can_view_clinical_context() or not document.consultation_id:
@@ -887,9 +936,10 @@ class PatientDocumentBatchUploadSerializer(
     def validate_files(self, files):
         if sum(uploaded_file.size for uploaded_file in files) > MAX_BATCH_SIZE:
             raise serializers.ValidationError("El lote puede pesar como máximo 50 MB.")
-        for uploaded_file in files:
-            validate_document_file(uploaded_file)
-        return files
+        cleaned = [validate_document_file(uploaded_file) for uploaded_file in files]
+        if sum(uploaded_file.size for uploaded_file in cleaned) > MAX_BATCH_SIZE:
+            raise serializers.ValidationError("El lote procesado supera 50 MB.")
+        return cleaned
 
     def validate(self, attrs):
         return validate_patient_document_context(
@@ -906,19 +956,19 @@ class PatientDocumentBatchUploadSerializer(
         try:
             with transaction.atomic():
                 for uploaded_file in files:
-                    created.append(PatientDocument.objects.create(
+                    document = PatientDocument(
                         patient=patient,
                         uploaded_by=uploaded_by,
                         original_name=safe_original_name(uploaded_file.name),
                         mime_type=uploaded_file.content_type.lower(),
                         size_bytes=uploaded_file.size,
-                        file=uploaded_file,
                         **validated_data,
-                    ))
+                    )
+                    save_tracked_upload(document.file, uploaded_file, self.context["request"])
+                    document.save(force_insert=True)
+                    created.append(document)
         except Exception:
-            for document in created:
-                if document.file.name:
-                    document.file.storage.delete(document.file.name)
+            cleanup_created_uploads(self.context["request"])
             raise
         return created
 

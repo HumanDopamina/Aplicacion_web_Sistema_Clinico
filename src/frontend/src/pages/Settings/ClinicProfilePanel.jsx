@@ -1,9 +1,11 @@
+import { useSystemFeatures } from '../../context/systemFeaturesValue'
 import { useEffect, useState } from 'react'
 import { useClinic } from '../../context/clinicContextValue'
 import { getClinicOptions, updateClinicProfile } from '../../services/clinicService'
 import fallbackLogo from '../../assets/logo_login.svg'
 
 export default function ClinicProfilePanel({ accessToken }) {
+  const { uploads } = useSystemFeatures()
   const { profile, setProfile } = useClinic()
   const [values, setValues] = useState(profile)
   const [options, setOptions] = useState({ currencies: [], timezones: [] })
@@ -44,7 +46,7 @@ export default function ClinicProfilePanel({ accessToken }) {
       <div className="grid gap-6 p-5 md:grid-cols-[170px_1fr]">
         <div>
           <div className="grid aspect-square place-items-center overflow-hidden rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4"><img src={logo ? URL.createObjectURL(logo) : profile.logo_url || fallbackLogo} alt="Vista previa del logo" className="max-h-full max-w-full object-contain" /></div>
-          <label className="mt-3 block cursor-pointer rounded-xl border border-slate-200 px-3 py-2 text-center text-xs font-semibold text-blue-700 hover:bg-blue-50">Reemplazar logo<input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => setLogo(event.target.files[0] || null)} /></label>
+          <label className="mt-3 block cursor-pointer rounded-xl border border-slate-200 px-3 py-2 text-center text-xs font-semibold text-blue-700 hover:bg-blue-50">Reemplazar logo<input className="sr-only" type="file" disabled={!uploads} accept="image/png,image/jpeg,image/webp" onChange={(event) => setLogo(event.target.files[0] || null)} /></label>
           <p className="mt-2 text-[11px] text-slate-400">PNG, JPEG o WebP · máximo 2 MB</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">

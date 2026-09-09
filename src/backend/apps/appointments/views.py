@@ -86,10 +86,16 @@ class AppointmentListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         queryset = Appointment.objects.select_related("patient", "dentist", "created_by", "service")
         queryset = scope_appointments_for_user(queryset, self.request.user)
-        appointment_date = self.request.query_params.get("date")
-        date_from = self.request.query_params.get("date_from")
-        date_to = self.request.query_params.get("date_to")
-        dentist = self.request.query_params.get("dentist")
+        from apps.common.query_parameters import validated_parameter
+        from rest_framework import serializers
+
+        params = self.request.query_params
+        appointment_date = validated_parameter(params, "date", serializers.DateField())
+        date_from = validated_parameter(params, "date_from", serializers.DateField())
+        date_to = validated_parameter(params, "date_to", serializers.DateField())
+        dentist = validated_parameter(params, "dentist", serializers.IntegerField(min_value=1))
+        if date_from and date_to and date_from > date_to:
+            raise serializers.ValidationError({"date_to": "Debe ser igual o posterior a date_from."})
         appointment_status = self.request.query_params.get("status")
         if appointment_date:
             queryset = queryset.filter(date=appointment_date)

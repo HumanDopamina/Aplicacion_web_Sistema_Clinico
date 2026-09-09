@@ -10,6 +10,8 @@ from django.utils.module_loading import import_string
 from rest_framework import serializers
 
 from apps.common.file_validation import validate_image_content
+from apps.common.pdf_validation import validate_pdf_content
+from apps.common.features import require_uploads_enabled
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
@@ -69,6 +71,7 @@ def safe_original_name(value):
 
 
 def validate_document_file(uploaded_file):
+    require_uploads_enabled()
     extension = Path(uploaded_file.name).suffix.lower()
     content_type = getattr(uploaded_file, "content_type", "").lower()
     if (
@@ -85,17 +88,15 @@ def validate_document_file(uploaded_file):
     uploaded_file.seek(0)
     try:
         if content_type == "application/pdf":
-            head = uploaded_file.read(5)
-            uploaded_file.seek(max(0, uploaded_file.size - 1024))
-            tail = uploaded_file.read()
-            if head != b"%PDF-" or b"%%EOF" not in tail:
-                raise serializers.ValidationError("El contenido del archivo PDF no es válido.")
+            validate_pdf_content(uploaded_file)
         else:
-            validate_image_content(
+            uploaded_file = validate_image_content(
                 uploaded_file,
                 IMAGE_FORMATS[content_type],
                 "El contenido de la imagen no es válido.",
             )
+            if uploaded_file.size > MAX_FILE_SIZE:
+                raise serializers.ValidationError("La imagen procesada supera 10 MB.")
     except serializers.ValidationError:
         raise
     finally:

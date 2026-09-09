@@ -501,7 +501,7 @@ def _document_story(patient, styles):
     return story
 
 
-def build_clinical_record_pdf(*, patient, clinic, generated_at):
+def build_clinical_record_pdf(*, patient, clinic, generated_at, include_documents=False):
     styles = _styles()
     logo_reader = _logo_reader(clinic)
     buffer = BytesIO()
@@ -529,7 +529,8 @@ def build_clinical_record_pdf(*, patient, clinic, generated_at):
     story.extend(_consultation_story(patient, styles))
     story.extend(_treatment_story(patient, styles))
     story.extend(_odontogram_story(patient, styles))
-    story.extend(_document_story(patient, styles))
+    if include_documents:
+        story.extend(_document_story(patient, styles))
     story.extend([
         Spacer(1, 5 * mm),
         HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#D4DAE0")),

@@ -248,7 +248,7 @@ export default function PatientRecordPage({ isNew = false }) {
   const persistPatient = async (payload) => {
     const saved = isNew
       ? await createPatient(accessToken, payload)
-      : await updatePatient(accessToken, id, payload)
+      : await updatePatient(accessToken, id, { ...payload, expected_version: patient.version })
     const savedForm = formFromPatient(saved)
     setPatient(saved)
     setForm(savedForm)

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createUser,
+  deleteUser,
   getCurrentUser,
   getUserAvatarContent,
   listRolePermissionPresets,
@@ -91,6 +92,21 @@ describe('userService', () => {
     })
   })
 
+  it('deletes a user with bearer authentication and DELETE', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({}, 204))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await deleteUser('access-token', 4)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${apiUrl}/api/auth/users/4/`,
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    )
+  })
+
   it('loads and updates the authenticated profile using the current-user endpoint', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response({ id: 4, first_name: 'Elena' }))
@@ -137,14 +153,19 @@ describe('userService', () => {
     )
   })
 
-  it('requests a bounded staff page', async () => {
+  it('requests a bounded archived staff page while preserving search', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ count: 0, results: [] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await listUsers('access-token', 2, 25)
+    await listUsers('access-token', {
+      page: 2,
+      pageSize: 25,
+      status: 'archived',
+      search: 'Ana Pérez',
+    })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      `${apiUrl}/api/auth/users/?page=2&page_size=25`,
+      `${apiUrl}/api/auth/users/?page=2&page_size=25&status=archived&search=Ana+P%C3%A9rez`,
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
       }),
