@@ -11,6 +11,7 @@ from django.test import override_settings
 from PIL import Image
 from rest_framework.test import APITestCase
 
+from apps.common.test_utils import close_test_response
 from apps.users.models import RolePermissionPreset, User
 
 from .models import Consultation, Patient, PatientDocument
@@ -221,7 +222,7 @@ class PatientDocumentApiTests(APITestCase):
         self.assertEqual(content["Content-Type"], "image/png")
         self.assertEqual(invalid_pdf.status_code, 400)
         self.assertIn("imagen", str(invalid_pdf.data).lower())
-        content.close()
+        close_test_response(content)
 
     def test_filters_by_consultation_and_keeps_patient_only_documents_visible(self):
         self.client.force_authenticate(self.receptionist)

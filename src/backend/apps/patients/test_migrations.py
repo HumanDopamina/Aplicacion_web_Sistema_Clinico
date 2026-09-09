@@ -1,11 +1,11 @@
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
 
+from apps.common.test_utils import MigrationTestCase
 from apps.users.models import User
 
 
-class PatientNationalIdKeyMigrationTests(TransactionTestCase):
+class PatientNationalIdKeyMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0004_consultation_abdomen_pelvis_and_more")
     migrate_to = ("patients", "0005_patient_national_id_key")
 
@@ -19,11 +19,6 @@ class PatientNationalIdKeyMigrationTests(TransactionTestCase):
             password="!",
             role="ADMINISTRADOR",
         )
-
-    def tearDown(self):
-        executor = MigrationExecutor(connection)
-        executor.migrate([("patients", "0006_odontogramversion")])
-        super().tearDown()
 
     def create_patient(self, national_id, email):
         patient_model = self.old_apps.get_model("patients", "Patient")
@@ -73,7 +68,7 @@ class PatientNationalIdKeyMigrationTests(TransactionTestCase):
         old_patient_model.objects.filter(pk=second.pk).delete()
 
 
-class OdontogramVersionMigrationTests(TransactionTestCase):
+class OdontogramVersionMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0005_patient_national_id_key")
     migrate_to = ("patients", "0006_odontogramversion")
 
@@ -113,10 +108,6 @@ class OdontogramVersionMigrationTests(TransactionTestCase):
             for day in (8, 9)
         ]
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
-
     def test_migration_creates_an_empty_linked_version_for_each_consultation(self):
         self.executor = MigrationExecutor(connection)
         self.executor.migrate([self.migrate_to])
@@ -136,7 +127,7 @@ class OdontogramVersionMigrationTests(TransactionTestCase):
         self.assertEqual(versions[1].based_on_id, versions[0].pk)
 
 
-class ClinicalAlertMigrationTests(TransactionTestCase):
+class ClinicalAlertMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0008_consultation_dashboard_index")
     migrate_to = ("patients", "0009_clinical_record_alerts")
 
@@ -177,10 +168,6 @@ class ClinicalAlertMigrationTests(TransactionTestCase):
             )
             self.record_ids[name] = record.pk
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
-
     def test_hu28_backfills_only_exact_historical_allergy_signal(self):
         self.executor = MigrationExecutor(connection)
         self.executor.migrate([self.migrate_to])
@@ -205,7 +192,7 @@ class ClinicalAlertMigrationTests(TransactionTestCase):
                 self.assertEqual(record.family_history, f"Antecedente conservado {name}")
 
 
-class ConsultationCompletionMigrationTests(TransactionTestCase):
+class ConsultationCompletionMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0009_clinical_record_alerts")
     migrate_to = ("patients", "0010_consultation_completion")
 
@@ -245,10 +232,6 @@ class ConsultationCompletionMigrationTests(TransactionTestCase):
             )
             self.original[consultation.pk] = (status, consultation.summary)
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
-
     def test_expansion_preserves_historical_consultations_without_guessing_closure(self):
         self.executor = MigrationExecutor(connection)
         self.executor.migrate([self.migrate_to])
@@ -265,7 +248,7 @@ class ConsultationCompletionMigrationTests(TransactionTestCase):
                 self.assertIsNone(consultation.completed_by_id)
 
 
-class TreatmentItemMigrationTests(TransactionTestCase):
+class TreatmentItemMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0010_consultation_completion")
     migrate_to = ("patients", "0011_treatmentitem")
 
@@ -328,10 +311,6 @@ class TreatmentItemMigrationTests(TransactionTestCase):
         )
         self.consultation_id = consultation.pk
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
-
     def test_schema_expansion_does_not_infer_items_or_change_related_clinical_data(self):
         self.executor = MigrationExecutor(connection)
         self.executor.migrate([self.migrate_to])
@@ -355,7 +334,7 @@ class TreatmentItemMigrationTests(TransactionTestCase):
         self.assertEqual(service_model.objects.count(), 1)
 
 
-class TreatmentItemLifecycleMigrationTests(TransactionTestCase):
+class TreatmentItemLifecycleMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0011_treatmentitem")
     migrate_to = ("patients", "0012_treatmentitem_lifecycle")
 
@@ -399,10 +378,6 @@ class TreatmentItemLifecycleMigrationTests(TransactionTestCase):
             notes="Texto que no es motivo ni ejecución",
         ).pk
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
-
     def test_nullable_expansion_preserves_item_without_backfill(self):
         self.executor = MigrationExecutor(connection)
         self.executor.migrate([self.migrate_to])
@@ -419,7 +394,7 @@ class TreatmentItemLifecycleMigrationTests(TransactionTestCase):
         self.assertEqual(item.status_reason, "")
 
 
-class TreatmentItemOdontogramResultMigrationTests(TransactionTestCase):
+class TreatmentItemOdontogramResultMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0012_treatmentitem_lifecycle")
     migrate_to = ("patients", "0013_treatmentitem_odontogram_result")
 
@@ -474,10 +449,6 @@ class TreatmentItemOdontogramResultMigrationTests(TransactionTestCase):
             status="ACEPTADO",
         ).pk
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
-
     def test_nullable_trace_expansion_preserves_historical_rows_without_backfill(self):
         self.executor = MigrationExecutor(connection)
         self.executor.migrate([self.migrate_to])
@@ -496,7 +467,7 @@ class TreatmentItemOdontogramResultMigrationTests(TransactionTestCase):
         self.assertTrue(field.one_to_one)
 
 
-class PatientDocumentContextMigrationTests(TransactionTestCase):
+class PatientDocumentContextMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0015_contract_legacy_national_id")
     migrate_to = ("patients", "0016_patientdocument_consultation_and_tooth_code")
 
@@ -536,10 +507,6 @@ class PatientDocumentContextMigrationTests(TransactionTestCase):
                 file=f"patients/{patient.pk}/documents/historico-{index}.png",
                 uploaded_by_id=self.user.pk,
             ).pk)
-
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
 
     def test_nullable_context_expansion_preserves_four_historical_documents(self):
         self.executor = MigrationExecutor(connection)

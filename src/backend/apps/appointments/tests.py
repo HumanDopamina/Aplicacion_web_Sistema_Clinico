@@ -40,6 +40,16 @@ class AppointmentRangeTests(SimpleTestCase):
         self.assertEqual(scheduled_range.upper, datetime(2026, 8, 12, 10, 0, tzinfo=UTC))
         self.assertEqual(scheduled_range.bounds, "[)")
 
+    def test_normalizes_model_field_strings_before_building_the_range(self):
+        scheduled_range = appointment_models.appointment_scheduled_range(
+            "2026-08-12",
+            "09:00:00",
+            60,
+        )
+
+        self.assertEqual(scheduled_range.lower, datetime(2026, 8, 12, 9, 0, tzinfo=UTC))
+        self.assertEqual(scheduled_range.upper, datetime(2026, 8, 12, 10, 0, tzinfo=UTC))
+
 
 class AppointmentApiTests(APITestCase):
     list_url = "/api/appointments/"

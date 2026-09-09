@@ -1,12 +1,13 @@
 from django.core.exceptions import FieldDoesNotExist
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+
+from apps.common.test_utils import MigrationTestCase
 
 from apps.users.models import User
 
 
-class PatientFlexibleIdentificationMigrationTests(TransactionTestCase):
+class PatientFlexibleIdentificationMigrationTests(MigrationTestCase):
     migrate_from = ("patients", "0013_treatmentitem_odontogram_result")
     migrate_to = ("patients", "0015_contract_legacy_national_id")
 
@@ -43,10 +44,6 @@ class PatientFlexibleIdentificationMigrationTests(TransactionTestCase):
         self.apps = self.executor.loader.project_state([self.migrate_to]).apps
         self.patient_model = self.apps.get_model("patients", "Patient")
         self.new_patient_index = 0
-
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
 
     def _create_legacy_patient(self, *, national_id, national_id_key, email):
         patient_model = self.old_apps.get_model("patients", "Patient")

@@ -24,6 +24,8 @@ BLOCKING_APPOINTMENT_STATUSES = (
 
 
 def appointment_scheduled_range(appointment_date, start_time, duration_minutes):
+    appointment_date = models.DateField().to_python(appointment_date)
+    start_time = models.TimeField().to_python(start_time)
     start = datetime.combine(appointment_date, start_time)
     if settings.USE_TZ and timezone.is_naive(start):
         start = timezone.make_aware(start, timezone.get_default_timezone())

@@ -3,10 +3,8 @@ from unittest import skipUnless
 
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
 
-from apps.patients.models import Patient
-from apps.users.models import User
+from apps.common.test_utils import MigrationTestCase
 
 from .models import appointment_scheduled_range
 
@@ -18,38 +16,44 @@ POSTGRES_ONLY = skipUnless(
 
 
 @POSTGRES_ONLY
-class AppointmentRangeMigrationTests(TransactionTestCase):
+class AppointmentRangeMigrationTests(MigrationTestCase):
     migrate_from = ("appointments", "0002_appointment_service_and_flexible_duration")
     migrate_to = ("appointments", "0004_appointment_overlap_constraints")
-    restore_to = ("appointments", "0006_validate_appointment_consultation")
 
     def setUp(self):
         super().setUp()
         self.executor = MigrationExecutor(connection)
-        self.executor.migrate([self.migrate_from])
-        self.old_apps = self.executor.loader.project_state([self.migrate_from]).apps
-        self.admin = User.objects.create(
+        historical_targets = [
+            self.migrate_from,
+            *(
+                node
+                for node in self.executor.loader.graph.leaf_nodes()
+                if node[0] != self.migrate_from[0]
+            ),
+        ]
+        self.executor.migrate(historical_targets)
+        self.old_apps = self.executor.loader.project_state(historical_targets).apps
+        UserModel = self.old_apps.get_model("users", "User")
+        self.admin = UserModel.objects.create(
             email="appointment-migration-admin@example.test",
             password="!",
             role="ADMINISTRADOR",
         )
-        self.dentist = User.objects.create(
+        self.dentist = UserModel.objects.create(
             email="appointment-migration-dentist@example.test",
             password="!",
             role="ODONTOLOGO",
         )
         self.patient = self.create_patient("001-010190-9201A", "Primero")
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.restore_to])
-        super().tearDown()
-
     def create_patient(self, national_id, first_name):
-        return Patient.objects.create(
+        PatientModel = self.old_apps.get_model("patients", "Patient")
+        return PatientModel.objects.create(
             first_name=first_name,
             last_name="Migración",
             birth_place="Managua",
-            national_id=national_id,
+            identification_type="CEDULA",
+            identification_number=national_id,
             gender="OTRO",
             date_of_birth="1990-01-01",
             registered_by_id=self.admin.pk,
@@ -113,7 +117,7 @@ class AppointmentRangeMigrationTests(TransactionTestCase):
         old_model.objects.filter(pk=second.pk).delete()
 
 
-class AppointmentAttendanceMigrationTests(TransactionTestCase):
+class AppointmentAttendanceMigrationTests(MigrationTestCase):
     migrate_from = ("appointments", "0004_appointment_overlap_constraints")
     migrate_to = ("appointments", "0006_validate_appointment_consultation")
 
@@ -194,14 +198,6 @@ class AppointmentAttendanceMigrationTests(TransactionTestCase):
             )
         self.appointment = AppointmentModel.objects.create(**values)
 
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([
-            ("appointments", "0007_appointmentrescheduleevent_and_more"),
-            ("patients", "0016_patientdocument_consultation_and_tooth_code"),
-            ("users", "0010_user_professional_profile"),
-        ])
-        super().tearDown()
-
     def test_safe_migration_preserves_counts_ids_and_leaves_historical_links_null(self):
         before_counts = {
             "appointments": self.old_apps.get_model(
@@ -268,7 +264,7 @@ class AppointmentAttendanceMigrationTests(TransactionTestCase):
                 duplicate.save(force_insert=True)
 
 
-class AppointmentCheckInAndRescheduleMigrationTests(TransactionTestCase):
+class AppointmentCheckInAndRescheduleMigrationTests(MigrationTestCase):
     migrate_from = ("appointments", "0006_validate_appointment_consultation")
     migrate_to = ("appointments", "0007_appointmentrescheduleevent_and_more")
 
@@ -325,14 +321,6 @@ class AppointmentCheckInAndRescheduleMigrationTests(TransactionTestCase):
                 60,
             )
         self.appointment = AppointmentModel.objects.create(**values)
-
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([
-            self.migrate_to,
-            ("patients", "0016_patientdocument_consultation_and_tooth_code"),
-            ("users", "0010_user_professional_profile"),
-        ])
-        super().tearDown()
 
     def test_migration_preserves_appointments_and_starts_with_empty_history(self):
         before_count = self.old_apps.get_model(

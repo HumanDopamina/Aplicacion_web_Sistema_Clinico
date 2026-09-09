@@ -228,7 +228,7 @@ class PatientApiTests(APITestCase):
         response = self.client.post(self.list_url, self.payload(), format="json")
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["code"], "PAC-00001")
+        self.assertEqual(response.data["code"], f"PAC-{response.data['id']:05d}")
         self.assertEqual(response.data["full_name"], "María Fernanda García López")
         self.assertEqual(response.data["registered_by"], self.receptionist.pk)
         detail = self.client.get(f"{self.list_url}{response.data['id']}/")
@@ -399,7 +399,7 @@ class PatientApiTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.data["code"], "PAC-00001")
+        self.assertEqual(response.data["code"], f"PAC-{response.data['id']:05d}")
         self.assertEqual(response.data["registered_by"], self.receptionist.pk)
 
     def test_hu10_authorized_user_lists_and_searches_patient_records(self):
@@ -562,7 +562,7 @@ class PatientApiTests(APITestCase):
         self.assertEqual(response.data["address"], "Residencial Las Colinas")
         self.assertEqual(response.data["emergency_phone"], "+505 7777 3333")
         self.assertEqual(response.data["identification_number"], "001-160498-0001A")
-        self.assertEqual(response.data["code"], "PAC-00001")
+        self.assertEqual(response.data["code"], f"PAC-{response.data['id']:05d}")
         self.assertEqual(response.data["registered_by"], self.admin.pk)
 
     def test_hu10_user_without_edit_permission_cannot_modify_patient(self):

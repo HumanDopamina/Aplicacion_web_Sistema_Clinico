@@ -1,9 +1,10 @@
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+
+from apps.common.test_utils import MigrationTestCase
 
 
-class DentistProfessionalProfileMigrationTests(TransactionTestCase):
+class DentistProfessionalProfileMigrationTests(MigrationTestCase):
     migrate_from = ("users", "0009_user_profile_fields")
     migrate_to = ("users", "0010_user_professional_profile")
 
@@ -20,10 +21,6 @@ class DentistProfessionalProfileMigrationTests(TransactionTestCase):
             first_name="Elena",
             last_name="Rivera",
         ).pk
-
-    def tearDown(self):
-        MigrationExecutor(connection).migrate([self.migrate_to])
-        super().tearDown()
 
     def test_hu61_expansion_preserves_existing_user_and_adds_blank_optional_fields(self):
         self.executor = MigrationExecutor(connection)

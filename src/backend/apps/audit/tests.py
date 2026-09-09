@@ -12,6 +12,7 @@ from django.urls import resolve, reverse
 from rest_framework.test import APITestCase
 
 from apps.appointments.models import Appointment
+from apps.common.test_utils import close_test_response
 from apps.patients.models import Consultation, Patient, PatientDocument, TreatmentItem
 from apps.users.models import User
 
@@ -486,7 +487,7 @@ class AuditEventClassificationTests(APITestCase):
             resource_id=document.pk,
             patient_id=self.patient.pk,
         )
-        viewed.close()
+        close_test_response(viewed)
 
         downloaded = self.client.get(f"{content_url}?download=true")
         self.assertEqual(downloaded.status_code, 200)
@@ -497,7 +498,7 @@ class AuditEventClassificationTests(APITestCase):
             resource_id=document.pk,
             patient_id=self.patient.pk,
         )
-        downloaded.close()
+        close_test_response(downloaded)
 
     def test_document_context_update_records_safe_changed_fields(self):
         consultation = Consultation.objects.create(
