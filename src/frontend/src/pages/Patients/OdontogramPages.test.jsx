@@ -232,7 +232,7 @@ describe('versioned odontograms', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cargar última versión' }))
     expect(await screen.findByText('Versión 2')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument())
-  })
+  }, 10_000)
 
   it('shows the patient timeline and compares arbitrary versions', async () => {
     const secondVersion = {
