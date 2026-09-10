@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createUser,
+  deleteUser,
   getCurrentUser,
   getUserAvatarContent,
   listRolePermissionPresets,
@@ -9,6 +10,8 @@ import {
   updateCurrentProfile,
   updateUser,
 } from './userService'
+
+const apiUrl = `${window.location.protocol}//${window.location.hostname}:8000`
 
 const response = (data, status = 200) => ({
   ok: status >= 200 && status < 300,
@@ -26,7 +29,7 @@ describe('userService', () => {
     await listUsers('access-token')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/users/',
+      `${apiUrl}/api/auth/users/`,
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
       }),
@@ -48,7 +51,7 @@ describe('userService', () => {
     await createUser('access-token', payload)
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/users/',
+      `${apiUrl}/api/auth/users/`,
       expect.objectContaining({
         method: 'POST',
         body: expect.any(FormData),
@@ -69,12 +72,14 @@ describe('userService', () => {
       last_name: 'Vargas',
       role: 'ODONTOLOGO',
       is_active: false,
+      new_password: 'NuevaClaveSegura456!',
+      confirm_password: 'NuevaClaveSegura456!',
     }
 
     await updateUser('access-token', 4, changes)
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/users/4/',
+      `${apiUrl}/api/auth/users/4/`,
       expect.objectContaining({
         method: 'PATCH',
         body: expect.any(FormData),
@@ -85,6 +90,21 @@ describe('userService', () => {
       ...changes,
       is_active: 'false',
     })
+  })
+
+  it('deletes a user with bearer authentication and DELETE', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({}, 204))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await deleteUser('access-token', 4)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${apiUrl}/api/auth/users/4/`,
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    )
   })
 
   it('loads and updates the authenticated profile using the current-user endpoint', async () => {
@@ -99,8 +119,8 @@ describe('userService', () => {
       remove_avatar: true,
     })
 
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:8000/api/auth/me/')
-    expect(fetchMock.mock.calls[1][0]).toBe('http://127.0.0.1:8000/api/auth/me/')
+    expect(fetchMock.mock.calls[0][0]).toBe(`${apiUrl}/api/auth/me/`)
+    expect(fetchMock.mock.calls[1][0]).toBe(`${apiUrl}/api/auth/me/`)
     expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
       method: 'PATCH',
       body: expect.any(FormData),
@@ -126,7 +146,26 @@ describe('userService', () => {
       '/api/auth/users/4/avatar/',
     )).resolves.toBe(avatar)
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/users/4/avatar/',
+      `${apiUrl}/api/auth/users/4/avatar/`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
+      }),
+    )
+  })
+
+  it('requests a bounded archived staff page while preserving search', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ count: 0, results: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await listUsers('access-token', {
+      page: 2,
+      pageSize: 25,
+      status: 'archived',
+      search: 'Ana Pérez',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${apiUrl}/api/auth/users/?page=2&page_size=25&status=archived&search=Ana+P%C3%A9rez`,
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
       }),
@@ -140,7 +179,7 @@ describe('userService', () => {
     await listRolePermissionPresets('access-token')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/role-permissions/',
+      `${apiUrl}/api/auth/role-permissions/`,
       expect.objectContaining({
         headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
       }),
@@ -157,7 +196,7 @@ describe('userService', () => {
     await updateRolePermissionPreset('access-token', 'ODONTOLOGO', ['patients.view'])
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/role-permissions/ODONTOLOGO/',
+      `${apiUrl}/api/auth/role-permissions/ODONTOLOGO/`,
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ permissions: ['patients.view'] }),

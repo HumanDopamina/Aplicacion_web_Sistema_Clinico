@@ -1,12 +1,50 @@
-import { apiRequest } from './api'
+import { apiRequest, csrfRequest, refreshAccessToken, setAccessToken } from './api'
 
-export const login = (credentials) => apiRequest('/api/auth/login/', {
-  method: 'POST', body: JSON.stringify(credentials),
-})
+export const LOGOUT_PENDING_KEY = 'dentalclinic.logoutPending'
+let logoutPending = false
 
-export const logout = ({ access, refresh }) => apiRequest('/api/auth/logout/', {
-  method: 'POST',
-  body: JSON.stringify({ refresh }),
+function setLogoutPending(pending) {
+  logoutPending = pending
+  try {
+    if (pending) localStorage.setItem(LOGOUT_PENDING_KEY, '1')
+    else localStorage.removeItem(LOGOUT_PENDING_KEY)
+  } catch { /* Memory fallback for browsers that disallow storage. */ }
+}
+
+function hasPendingLogout() {
+  try { return logoutPending || localStorage.getItem(LOGOUT_PENDING_KEY) === '1' }
+  catch { return logoutPending }
+}
+
+export async function login(credentials) {
+  const session = await csrfRequest('/api/auth/login/', {
+    method: 'POST', body: JSON.stringify(credentials),
+  })
+  setAccessToken(session.access)
+  setLogoutPending(false)
+  return session
+}
+
+export async function logout({ access } = {}) {
+  setLogoutPending(true)
+  await csrfRequest('/api/auth/logout/', {
+    method: 'POST', body: JSON.stringify({}),
+    ...(access ? { headers: { Authorization: `Bearer ${access}` } } : {}),
+  })
+  setLogoutPending(false)
+}
+
+export async function restoreSession() {
+  if (hasPendingLogout()) {
+    await logout()
+    return null
+  }
+  const access = await refreshAccessToken()
+  const user = await getCurrentSessionUser(access)
+  return { access, user }
+}
+
+export const getCurrentSessionUser = (access) => apiRequest('/api/auth/me/', {
   headers: { Authorization: `Bearer ${access}` },
 })
 

@@ -5,6 +5,7 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.utils.deconstruct import deconstructible
+from django.utils.module_loading import import_string
 
 
 @deconstructible
@@ -18,7 +19,7 @@ class PrivateAvatarStorage(FileSystemStorage):
         return os.path.abspath(self.base_location)
 
 
-private_avatar_storage = PrivateAvatarStorage()
+private_avatar_storage = import_string(settings.PRIVATE_AVATAR_STORAGE_BACKEND)()
 
 
 def user_avatar_path(instance, filename):

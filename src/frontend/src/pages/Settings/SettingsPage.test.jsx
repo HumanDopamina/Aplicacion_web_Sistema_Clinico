@@ -8,6 +8,7 @@ import SettingsPage from './SettingsPage'
 
 vi.mock('../../services/userService', () => ({
   createUser: vi.fn(),
+  deleteUser: vi.fn(),
   getUserAvatarContent: vi.fn(),
   listRolePermissionPresets: vi.fn(),
   listUsers: vi.fn(),
@@ -22,9 +23,12 @@ vi.mock('../../services/clinicService', () => ({
   updateServiceCategory: vi.fn(),
 }))
 
-const renderPage = () => render(
+const renderPage = (permissions = ['clinic.manage', 'users.manage']) => render(
   <MemoryRouter>
-    <AuthContext.Provider value={{ accessToken: 'access-token' }}>
+    <AuthContext.Provider value={{
+      accessToken: 'access-token',
+      user: { id: 1, role: 'ADMINISTRADOR', permissions },
+    }}>
       <SettingsPage />
     </AuthContext.Provider>
   </MemoryRouter>,
@@ -71,8 +75,9 @@ describe('SettingsPage staff management', () => {
       last_name: 'Vargas',
       phone: '',
       role: 'ODONTOLOGO',
-      is_active: false,
+      is_active: true,
     })
+    userService.deleteUser.mockResolvedValue({})
     userService.listRolePermissionPresets.mockResolvedValue({
       available_permissions: [
         { code: 'patients.view', label: 'Ver pacientes', group: 'Pacientes' },
@@ -110,12 +115,151 @@ describe('SettingsPage staff management', () => {
     expect(screen.queryByRole('heading', { name: 'Gestión de Staff' })).not.toBeInTheDocument()
   })
 
-  it('shows an empty state when no staff users exist', async () => {
+  it('opens staff in Activos and shows its specific empty state', async () => {
     renderPage()
     openStaff()
 
-    expect(await screen.findByText('Aún no hay miembros registrados.')).toBeInTheDocument()
+    expect(await screen.findByText('No hay usuarios activos.')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Activos' })).toHaveAttribute('aria-selected', 'true')
+    expect(userService.listUsers).toHaveBeenCalledWith('access-token', {
+      status: 'active',
+      search: '',
+    })
     expect(screen.getByRole('button', { name: 'Añadir miembro' })).toBeInTheDocument()
+  })
+
+  it('shows only configuration sections allowed by effective capabilities', async () => {
+    renderPage(['clinic.manage'])
+
+    expect(screen.getByRole('button', { name: /Perfil de la clínica/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Horarios de atención/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Servicios y tarifas/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Gestión de Staff/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Permisos por rol/ })).not.toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'Perfil de la clínica' })
+    expect(userService.listUsers).not.toHaveBeenCalled()
+  })
+
+  it('opens staff as the first allowed section for a user-management capability', async () => {
+    renderPage(['users.manage'])
+
+    expect(screen.queryByRole('button', { name: /Perfil de la clínica/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Gestión de Staff/ })).toHaveAttribute('aria-current', 'page')
+    expect(await screen.findByText('No hay usuarios activos.')).toBeInTheDocument()
+  })
+
+  it('does not expose notifications while that feature is outside the MVP', () => {
+    renderPage()
+
+    expect(screen.queryByRole('button', { name: /Notificaciones/ })).not.toBeInTheDocument()
+  })
+
+  it('loads the next bounded staff page', async () => {
+    userService.listUsers
+      .mockResolvedValueOnce({
+        count: 26,
+        next: '/api/auth/users/?page=2',
+        previous: null,
+        results: [{
+          id: 2,
+          email: 'ana@dentalclinic.com',
+          first_name: 'Ana',
+          last_name: 'Pérez',
+          role: 'ODONTOLOGO',
+          is_active: true,
+        }],
+      })
+      .mockResolvedValueOnce({
+        count: 26,
+        next: null,
+        previous: '/api/auth/users/',
+        results: [{
+          id: 3,
+          email: 'bruno@dentalclinic.com',
+          first_name: 'Bruno',
+          last_name: 'López',
+          role: 'RECEPCIONISTA',
+          is_active: true,
+        }],
+      })
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Página siguiente de Personal' }))
+
+    expect(await screen.findByText('Bruno López')).toBeInTheDocument()
+    expect(userService.listUsers).toHaveBeenLastCalledWith('access-token', {
+      page: 2,
+      status: 'active',
+      search: '',
+    })
+  })
+
+  it('switches from active users to archived users using backend filtering', async () => {
+    userService.listUsers.mockImplementation((_access, options) => Promise.resolve(
+      options.status === 'archived'
+        ? [{
+            id: 3,
+            email: 'paul@dentalclinic.com',
+            first_name: 'Paul',
+            last_name: 'Walker',
+            role: 'ODONTOLOGO',
+            is_active: false,
+          }]
+        : [{
+            id: 2,
+            email: 'ana@dentalclinic.com',
+            first_name: 'Ana',
+            last_name: 'Pérez',
+            role: 'ODONTOLOGO',
+            is_active: true,
+          }],
+    ))
+    renderPage()
+    openStaff()
+
+    expect(await screen.findByText('Ana Pérez')).toBeInTheDocument()
+    expect(screen.queryByText('Paul Walker')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: 'Archivados' }))
+
+    expect(await screen.findByText('Paul Walker')).toBeInTheDocument()
+    expect(screen.queryByText('Ana Pérez')).not.toBeInTheDocument()
+    expect(screen.getByText('Archivado')).toBeInTheDocument()
+    expect(userService.listUsers).toHaveBeenLastCalledWith('access-token', {
+      status: 'archived',
+      search: '',
+    })
+  })
+
+  it('keeps the active filter when searching staff', async () => {
+    renderPage()
+    openStaff()
+    await screen.findByText('No hay usuarios activos.')
+
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Buscar personal' }), {
+      target: { value: 'Elena' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Buscar' }))
+
+    await waitFor(() => expect(userService.listUsers).toHaveBeenLastCalledWith(
+      'access-token',
+      { status: 'active', search: 'Elena' },
+    ))
+  })
+
+  it('closes the staff dialog with Escape and restores focus to its opener', async () => {
+    renderPage()
+    openStaff()
+    const opener = await screen.findByRole('button', { name: 'Añadir miembro' })
+    opener.focus()
+    fireEvent.click(opener)
+
+    expect(screen.getByRole('dialog', { name: 'Añadir miembro' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Nombre')).toHaveFocus()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog', { name: 'Añadir miembro' })).not.toBeInTheDocument()
+    expect(opener).toHaveFocus()
   })
 
   it('opens operational panels only when selected and saves the clinic profile', async () => {
@@ -132,34 +276,35 @@ describe('SettingsPage staff management', () => {
     expect(screen.getByText('Aún no hay categorías.')).toBeInTheDocument()
   })
 
-  it('[HU-09] shows every registered user with role and active status', async () => {
-    userService.listUsers.mockResolvedValue([
-      {
-        id: 2,
-        email: 'ana@dentalclinic.com',
-        first_name: 'Ana',
-        last_name: 'Pérez',
-        role: 'ODONTOLOGO',
-        is_active: true,
-      },
-      {
+  it('[HU-09] shows each filtered user with role and status', async () => {
+    userService.listUsers.mockImplementation((_access, options) => Promise.resolve(
+      options.status === 'archived' ? [{
         id: 3,
         email: 'bruno@dentalclinic.com',
         first_name: 'Bruno',
         last_name: 'López',
         role: 'RECEPCIONISTA',
         is_active: false,
-      },
-    ])
+      }] : [{
+        id: 2,
+        email: 'ana@dentalclinic.com',
+        first_name: 'Ana',
+        last_name: 'Pérez',
+        role: 'ODONTOLOGO',
+        is_active: true,
+      }],
+    ))
     renderPage()
     openStaff()
 
     expect(await screen.findByText('Ana Pérez')).toBeInTheDocument()
-    expect(screen.getByText('Bruno López')).toBeInTheDocument()
     expect(screen.getByText('Odontólogo')).toBeInTheDocument()
-    expect(screen.getByText('Recepcionista')).toBeInTheDocument()
     expect(screen.getByText('Activo')).toBeInTheDocument()
-    expect(screen.getByText('Inactivo')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Archivados' }))
+    expect(await screen.findByText('Bruno López')).toBeInTheDocument()
+    expect(screen.getByText('Recepcionista')).toBeInTheDocument()
+    expect(screen.getByText('Archivado')).toBeInTheDocument()
   })
 
   it('[HU-09] lets an administrator update the permissions preset for a role', async () => {
@@ -369,11 +514,102 @@ describe('SettingsPage staff management', () => {
       last_name: 'Vargas',
       phone: '',
       role: 'ODONTOLOGO',
-      is_active: true,
     })
   })
 
-  it('[HU-07] deactivates a member and updates the visible status', async () => {
+  it('[HU-61] captures optional dentist credentials and preserves them across role changes', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '',
+      role: 'ODONTOLOGO',
+      specialty: 'Endodoncia',
+      professional_registration_number: 'REG-2048',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    expect(screen.getByLabelText('Especialidad')).toHaveValue('Endodoncia')
+    expect(screen.getByLabelText('Número de registro profesional')).toHaveValue('REG-2048')
+
+    fireEvent.change(screen.getByLabelText('Rol'), { target: { value: 'RECEPCIONISTA' } })
+    expect(screen.queryByLabelText('Especialidad')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Número de registro profesional')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      expect.objectContaining({
+        role: 'RECEPCIONISTA',
+        specialty: 'Endodoncia',
+        professional_registration_number: 'REG-2048',
+      }),
+    ))
+  })
+
+  it('[HU-61] lets an administrator clear optional dentist credentials', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '',
+      role: 'ODONTOLOGO',
+      specialty: 'Endodoncia',
+      professional_registration_number: 'REG-2048',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    fireEvent.change(screen.getByLabelText('Especialidad'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Número de registro profesional'), {
+      target: { value: '' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      expect.objectContaining({
+        specialty: '',
+        professional_registration_number: '',
+      }),
+    ))
+  })
+
+  it('[HU-61] shows blank optional professional fields for a new dentist', async () => {
+    renderPage()
+    openStaff()
+    fireEvent.click(await screen.findByRole('button', { name: 'Añadir miembro' }))
+
+    expect(screen.getByLabelText('Especialidad')).toHaveValue('')
+    expect(screen.getByLabelText('Número de registro profesional')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('Especialidad'), {
+      target: { value: 'Odontopediatría' },
+    })
+    fireEvent.change(screen.getByLabelText('Número de registro profesional'), {
+      target: { value: 'MINSA 7788' },
+    })
+    fillForm()
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar usuario' }))
+
+    await waitFor(() => expect(userService.createUser).toHaveBeenCalledWith(
+      'access-token',
+      expect.objectContaining({
+        specialty: 'Odontopediatría',
+        professional_registration_number: 'MINSA 7788',
+      }),
+    ))
+  })
+
+  it('[HU-06] lets an administrator assign a new staff password', async () => {
     userService.listUsers.mockResolvedValue([{
       id: 7,
       email: 'elena@dentalclinic.com',
@@ -387,12 +623,70 @@ describe('SettingsPage staff management', () => {
     openStaff()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
-    fireEvent.click(screen.getByLabelText('Usuario activo'))
+    fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }))
+    expect(screen.getByText(/cerrarán las sesiones activas/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Nueva contraseña'), {
+      target: { value: 'NuevaClaveSegura456!' },
+    })
+    fireEvent.change(screen.getByLabelText('Confirmar nueva contraseña'), {
+      target: { value: 'NuevaClaveSegura456!' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
 
-    expect(await screen.findByText('Inactivo')).toBeInTheDocument()
-    expect(screen.queryByRole('dialog', { name: 'Editar miembro' })).not.toBeInTheDocument()
-    expect(userService.updateUser).toHaveBeenCalledWith('access-token', 7, {
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      {
+        email: 'elena@dentalclinic.com',
+        first_name: 'Elena',
+        last_name: 'Méndez',
+        phone: '',
+        role: 'RECEPCIONISTA',
+        new_password: 'NuevaClaveSegura456!',
+        confirm_password: 'NuevaClaveSegura456!',
+      },
+    ))
+  })
+
+  it('[HU-06] rejects mismatched staff passwords before calling the API', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar a Elena Méndez' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cambiar contraseña' }))
+    fireEvent.change(screen.getByLabelText('Nueva contraseña'), {
+      target: { value: 'NuevaClaveSegura456!' },
+    })
+    fireEvent.change(screen.getByLabelText('Confirmar nueva contraseña'), {
+      target: { value: 'OtraClaveSegura789!' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Las contraseñas no coinciden.')
+    expect(userService.updateUser).not.toHaveBeenCalled()
+  })
+
+  it('archives a member only after explicit confirmation and removes it from Activos', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      phone: '',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    userService.updateUser.mockResolvedValue({
+      id: 7,
       email: 'elena@dentalclinic.com',
       first_name: 'Elena',
       last_name: 'Méndez',
@@ -400,5 +694,93 @@ describe('SettingsPage staff management', () => {
       role: 'RECEPCIONISTA',
       is_active: false,
     })
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Archivar a Elena Méndez' }))
+    expect(screen.getByRole('dialog', { name: 'Archivar usuario' })).toBeInTheDocument()
+    expect(screen.getByText(/dejará de poder iniciar sesión/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Eliminar a Elena Méndez' })).not.toBeInTheDocument()
+    expect(userService.updateUser).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar archivo' }))
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      { is_active: false },
+    ))
+    expect(screen.queryByText('Elena Méndez')).not.toBeInTheDocument()
+    expect(await screen.findByText('No hay usuarios activos.')).toBeInTheDocument()
+  })
+
+  it('reactivates an archived user without creating a replacement', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      role: 'RECEPCIONISTA',
+      is_active: false,
+    }])
+    userService.updateUser.mockResolvedValue({
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    })
+    renderPage()
+    openStaff()
+    fireEvent.click(screen.getByRole('tab', { name: 'Archivados' }))
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reactivar a Elena Méndez' }))
+
+    await waitFor(() => expect(userService.updateUser).toHaveBeenCalledWith(
+      'access-token',
+      7,
+      { is_active: true },
+    ))
+    expect(userService.createUser).not.toHaveBeenCalled()
+    expect(screen.queryByText('Elena Méndez')).not.toBeInTheDocument()
+    expect(await screen.findByText('No hay usuarios archivados.')).toBeInTheDocument()
+  })
+
+  it('does not offer to archive or delete the authenticated administrator', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 1,
+      email: 'admin@dentalclinic.com',
+      first_name: 'Ada',
+      last_name: 'Admin',
+      role: 'ADMINISTRADOR',
+      is_active: true,
+    }])
+    renderPage()
+    openStaff()
+
+    expect(await screen.findByText('Ada Admin')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Archivar a Ada Admin' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Eliminar a Ada Admin' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the archive confirmation open and shows backend errors', async () => {
+    userService.listUsers.mockResolvedValue([{
+      id: 7,
+      email: 'elena@dentalclinic.com',
+      first_name: 'Elena',
+      last_name: 'Méndez',
+      role: 'RECEPCIONISTA',
+      is_active: true,
+    }])
+    userService.updateUser.mockRejectedValue(new Error('No fue posible archivar el usuario.'))
+    renderPage()
+    openStaff()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Archivar a Elena Méndez' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar archivo' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No fue posible archivar')
+    expect(screen.getByRole('dialog', { name: 'Archivar usuario' })).toBeInTheDocument()
+    expect(screen.getAllByText('Elena Méndez')).toHaveLength(2)
   })
 })

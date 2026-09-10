@@ -13,6 +13,9 @@ from .views import (
 )
 
 
+app_name = "clinics"
+
+
 urlpatterns = [
     path("profile/", ClinicProfileView.as_view(), name="clinic-profile"),
     path("profile/options/", ClinicProfileOptionsView.as_view(), name="clinic-profile-options"),

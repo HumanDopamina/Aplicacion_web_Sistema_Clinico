@@ -19,13 +19,21 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from . import health
+
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/auth/', include('apps.users.urls')),
-    path('api/patients/', include('apps.patients.urls')),
-    path('api/appointments/', include('apps.appointments.urls')),
-    path('api/clinics/', include('apps.clinics.urls')),
+    path('api/system/features/', health.features, name='system-features'),
+    path('health/live/', health.live, name='health-live'),
+    path('health/ready/', health.ready, name='health-ready'),
+    path('api/auth/', include('apps.users.urls', namespace='users')),
+    path('api/patients/', include('apps.patients.urls', namespace='patients')),
+    path('api/appointments/', include('apps.appointments.urls', namespace='appointments')),
+    path('api/clinics/', include('apps.clinics.urls', namespace='clinics')),
+    path('api/audit/', include('apps.audit.urls', namespace='audit')),
 ]
+
+if settings.ENABLE_DJANGO_ADMIN:
+    urlpatterns.insert(0, path('admin/', admin.site.urls))
 
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

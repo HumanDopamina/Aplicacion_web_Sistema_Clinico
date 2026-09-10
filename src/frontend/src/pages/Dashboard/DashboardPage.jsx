@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { listAppointments } from '../../services/appointmentService'
-import { listPatients, listRecentConsultations } from '../../services/patientService'
+import { listAllAppointments } from '../../services/appointmentService'
+import { listPatientDashboardSummary, listRecentConsultations } from '../../services/patientService'
 import { formatClock, statusTone, todayValue } from '../Appointments/appointmentDisplay'
 import { useClinic } from '../../context/clinicContextValue'
 
@@ -84,7 +84,8 @@ function RecentConsultationsCard({ consultations, error, loading, personal, show
 export default function DashboardPage({ user, accessToken }) {
   const { profile } = useClinic()
   const navigate = useNavigate()
-  const [patients, setPatients] = useState([])
+  const [patientTotal, setPatientTotal] = useState(0)
+  const [recentlyAttendedPatients, setRecentlyAttendedPatients] = useState([])
   const [patientsLoading, setPatientsLoading] = useState(true)
   const [patientsError, setPatientsError] = useState('')
   const [appointments, setAppointments] = useState([])
@@ -120,8 +121,13 @@ export default function DashboardPage({ user, accessToken }) {
     let active = true
     setPatientsLoading(true)
     setPatientsError('')
-    listPatients(accessToken)
-      .then((data) => { if (active) setPatients(data) })
+    listPatientDashboardSummary(accessToken)
+      .then((data) => {
+        if (active) {
+          setPatientTotal(data.total_patients)
+          setRecentlyAttendedPatients(data.recently_attended)
+        }
+      })
       .catch((requestError) => { if (active) setPatientsError(requestError.message) })
       .finally(() => { if (active) setPatientsLoading(false) })
 
@@ -137,7 +143,7 @@ export default function DashboardPage({ user, accessToken }) {
     let active = true
     setAppointmentsLoading(true)
     setAppointmentsError('')
-    listAppointments(accessToken, { date: currentDate })
+    listAllAppointments(accessToken, { date: currentDate })
       .then((data) => { if (active) setAppointments(data) })
       .catch((requestError) => { if (active) setAppointmentsError(requestError.message) })
       .finally(() => { if (active) setAppointmentsLoading(false) })
@@ -177,7 +183,7 @@ export default function DashboardPage({ user, accessToken }) {
       </section>
 
       <section aria-label="Indicadores" className="grid gap-4 sm:grid-cols-2">
-        <StatCard label="Total pacientes" value={patientsLoading ? '—' : String(patients.length)} icon="♟" tone="bg-blue-50 text-blue-700" />
+        <StatCard label="Total pacientes" value={patientsLoading || patientsError ? '—' : String(patientTotal)} icon="♟" tone="bg-blue-50 text-blue-700" />
         <StatCard label="Citas de hoy" value={appointmentsLoading ? '—' : String(appointments.length)} icon="▣" tone="bg-emerald-50 text-emerald-700" />
       </section>
 
@@ -221,18 +227,18 @@ export default function DashboardPage({ user, accessToken }) {
 
           {showRecentPatients ? <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-            <div><h2 className="font-semibold text-slate-900">Pacientes recientes</h2><p className="text-xs text-slate-400">Últimos registros</p></div>
+            <div><h2 className="font-semibold text-slate-900">Pacientes recientes</h2><p className="text-xs text-slate-400">Últimas atenciones</p></div>
             <Link to="/pacientes" className="text-xs font-semibold text-blue-700 no-underline hover:underline">Ver todos →</Link>
           </div>
           {patientsLoading ? <div className="grid min-h-56 place-content-center px-6 py-10 text-center"><p className="text-sm text-slate-500">Cargando pacientes…</p></div> : null}
           {!patientsLoading && patientsError ? <div className="grid min-h-56 place-content-center px-6 py-10 text-center"><p role="alert" className="text-sm text-red-700">{patientsError}</p></div> : null}
-          {!patientsLoading && !patientsError && patients.length === 0 ? <div className="grid min-h-56 place-content-center px-6 py-10 text-center">
+          {!patientsLoading && !patientsError && recentlyAttendedPatients.length === 0 ? <div className="grid min-h-56 place-content-center px-6 py-10 text-center">
             <span aria-hidden="true" className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-xl text-slate-500">♟</span>
-            <p className="text-sm font-semibold text-slate-700">Aún no hay pacientes registrados.</p>
-            <p className="mt-1 text-xs text-slate-400">Registra el primer paciente para comenzar.</p>
+            <p className="text-sm font-semibold text-slate-700">No hay pacientes atendidos recientemente.</p>
+            <p className="mt-1 text-xs text-slate-400">Las consultas completadas aparecerán aquí.</p>
           </div> : null}
-          {!patientsLoading && !patientsError && patients.length > 0 ? <ul className="divide-y divide-slate-100">
-            {patients.slice(0, 4).map((patient) => <li key={patient.id}>
+          {!patientsLoading && !patientsError && recentlyAttendedPatients.length > 0 ? <ul className="divide-y divide-slate-100">
+            {recentlyAttendedPatients.map((patient) => <li key={patient.id}>
               <Link to={`/pacientes/${patient.id}`} aria-label={`Ver expediente de ${patient.full_name}`} className="flex items-center gap-3 px-5 py-4 no-underline transition hover:bg-slate-50">
                 <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-blue-50 text-xs font-bold text-blue-700">{initials(patient)}</span>
                 <span className="min-w-0">

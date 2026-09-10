@@ -1,42 +1,120 @@
-import { useCallback, useState } from 'react'
-import { logout as revokeSession } from '../services/authService'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  getCurrentSessionUser,
+  logout as revokeSession,
+  restoreSession,
+} from '../services/authService'
+import {
+  clearAccessToken,
+  setAccessToken,
+  setForbiddenHandler,
+  setSessionExpiredHandler,
+} from '../services/api'
 import { AuthContext } from './authContextValue'
 
-const KEY = 'dentalclinic_session'
-const readSession = () => {
-  try { return JSON.parse(localStorage.getItem(KEY) || sessionStorage.getItem(KEY) || 'null') } catch { return null }
-}
+export function AuthProvider({ children, initialSession }) {
+  const hasInitialSession = initialSession !== undefined
+  const [session, setSession] = useState(initialSession ?? null)
+  const [initializing, setInitializing] = useState(!hasInitialSession)
+  const revalidationRef = useRef(null)
 
-export function AuthProvider({ children }) {
-  const [session, setSession] = useState(readSession)
-  const signIn = (data, remember) => {
-    const storage = remember ? localStorage : sessionStorage
-    const other = remember ? sessionStorage : localStorage
-    other.removeItem(KEY)
-    storage.setItem(KEY, JSON.stringify(data))
-    setSession(data)
-  }
-  const signOut = async () => {
-    const sessionToRevoke = session
-    localStorage.removeItem(KEY)
-    sessionStorage.removeItem(KEY)
-    setSession(null)
-    if (sessionToRevoke?.access && sessionToRevoke?.refresh) {
-      try {
-        await revokeSession(sessionToRevoke)
-      } catch {
-        // Local logout must still complete if the API is temporarily unavailable.
-      }
+  useEffect(() => {
+    if (hasInitialSession) {
+      setAccessToken(initialSession?.access)
+      return undefined
     }
-  }
-  const updateUser = useCallback((user) => {
-    setSession((current) => {
-      if (!current) return current
-      const next = { ...current, user }
-      const storage = localStorage.getItem(KEY) ? localStorage : sessionStorage
-      storage.setItem(KEY, JSON.stringify(next))
-      return next
-    })
+    let active = true
+    restoreSession()
+      .then((restored) => {
+        if (active) setSession(restored)
+      })
+      .catch(() => {
+        clearAccessToken()
+        if (active) setSession(null)
+      })
+      .finally(() => {
+        if (active) setInitializing(false)
+      })
+    return () => { active = false }
+  }, [hasInitialSession, initialSession])
+
+  useEffect(() => {
+    setSessionExpiredHandler(() => setSession(null))
+    return () => setSessionExpiredHandler(null)
   }, [])
-  return <AuthContext.Provider value={{ user: session?.user, accessToken: session?.access, signIn, signOut, updateUser }}>{children}</AuthContext.Provider>
+
+  const revalidateUser = useCallback(() => {
+    const access = session?.access
+    if (!access) return Promise.resolve(null)
+    if (revalidationRef.current?.access === access) {
+      return revalidationRef.current.promise
+    }
+    const promise = getCurrentSessionUser(access)
+      .then((user) => {
+        setSession((current) => (
+          current?.access === access ? { ...current, user } : current
+        ))
+        return user
+      })
+      .finally(() => {
+        if (revalidationRef.current?.promise === promise) {
+          revalidationRef.current = null
+        }
+      })
+    revalidationRef.current = { access, promise }
+    return promise
+  }, [session?.access])
+
+  useEffect(() => {
+    const refreshCapabilities = () => { revalidateUser().catch(() => {}) }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') refreshCapabilities()
+    }
+    setForbiddenHandler(refreshCapabilities)
+    window.addEventListener('focus', refreshCapabilities)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      setForbiddenHandler(null)
+      window.removeEventListener('focus', refreshCapabilities)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [revalidateUser])
+
+  const signIn = useCallback((data) => {
+    setAccessToken(data.access)
+    setSession(data)
+    setInitializing(false)
+  }, [])
+
+  const signOut = useCallback(async ({ revoke = true } = {}) => {
+    const access = session?.access
+    clearAccessToken()
+    setSession(null)
+    try {
+      if (revoke) await revokeSession({ access })
+    } catch {
+      // La sesión local se cierra aunque la API no esté disponible.
+    } finally {
+      clearAccessToken()
+      setSession(null)
+    }
+  }, [session?.access])
+
+  const updateUser = useCallback((user) => {
+    setSession((current) => current ? { ...current, user } : current)
+  }, [])
+
+  return (
+    <AuthContext.Provider value={{
+      user: session?.user,
+      accessToken: session?.access,
+      initializing,
+      signIn,
+      signOut,
+      updateUser,
+      revalidateUser,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  )
 }

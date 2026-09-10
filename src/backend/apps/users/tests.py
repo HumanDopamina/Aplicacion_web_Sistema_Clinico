@@ -13,10 +13,13 @@ from django.test import override_settings
 from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
-from rest_framework.test import APITestCase
+from rest_framework.test import APIClient, APITestCase
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from PIL import Image
+
+from apps.audit.models import AuditEvent
+from apps.patients.models import Patient
 
 from .models import User
 
@@ -48,7 +51,7 @@ class LoginApiTests(APITestCase):
         )
         self.url = reverse("users:login")
 
-    def test_valid_credentials_return_tokens_and_safe_user_data(self):
+    def test_valid_credentials_return_access_and_safe_user_data(self):
         response = self.client.post(
             self.url,
             {"email": self.user.email, "password": "ContraseñaSegura123!"},
@@ -57,7 +60,8 @@ class LoginApiTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("access", response.data)
-        self.assertIn("refresh", response.data)
+        self.assertNotIn("refresh", response.data)
+        self.assertIn("dentalclinic_refresh", response.cookies)
         self.assertEqual(response.data["user"]["role"], User.Role.ADMINISTRADOR)
         self.assertEqual(
             response.data["user"]["permissions"],
@@ -76,6 +80,8 @@ class LoginApiTests(APITestCase):
                 "documents.view",
                 "documents.create",
                 "documents.delete",
+                "clinic.manage",
+                "users.manage",
             ],
         )
         self.assertNotIn("password", response.data["user"])
@@ -109,14 +115,14 @@ class LoginApiTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer invalid-token")
         self.assertEqual(self.client.get(url).status_code, 401)
 
-    def test_logout_requires_authentication(self):
+    def test_logout_without_session_is_idempotent(self):
         response = self.client.post(
             reverse("users:logout"),
             {"refresh": "invalid-token"},
             format="json",
         )
 
-        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.status_code, 204)
 
     def test_logout_blacklists_the_refresh_token(self):
         login_response = self.client.post(
@@ -125,12 +131,12 @@ class LoginApiTests(APITestCase):
             format="json",
         )
         access = login_response.data["access"]
-        refresh = login_response.data["refresh"]
+        refresh = login_response.cookies["dentalclinic_refresh"].value
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
 
         response = self.client.post(
             reverse("users:logout"),
-            {"refresh": refresh},
+            {},
             format="json",
         )
 
@@ -150,7 +156,7 @@ class LoginApiTests(APITestCase):
 
         refresh_response = self.client.post(
             reverse("users:token-refresh"),
-            {"refresh": login_response.data["refresh"]},
+            {},
             format="json",
         )
 
@@ -162,6 +168,235 @@ class LoginApiTests(APITestCase):
             self.client.get(reverse("users:current-user")).status_code,
             200,
         )
+
+
+class LoginRateLimitTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            email="limite@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.url = reverse("users:login")
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_sixth_failed_attempt_for_same_account_is_throttled(self):
+        for _ in range(5):
+            response = self.client.post(
+                self.url,
+                {"email": self.user.email, "password": "incorrecta"},
+                format="json",
+            )
+            self.assertEqual(response.status_code, 400)
+
+        blocked = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "incorrecta"},
+            format="json",
+        )
+
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(blocked["Retry-After"], "900")
+
+    def test_successful_login_clears_account_failure_counter(self):
+        for _ in range(4):
+            self.client.post(
+                self.url,
+                {"email": self.user.email, "password": "incorrecta"},
+                format="json",
+            )
+
+        success = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "ContraseñaSegura123!"},
+            format="json",
+        )
+        after_success = self.client.post(
+            self.url,
+            {"email": self.user.email, "password": "incorrecta"},
+            format="json",
+        )
+
+        self.assertEqual(success.status_code, 200)
+        self.assertEqual(after_success.status_code, 400)
+
+    def test_ip_limit_counts_failures_across_distinct_accounts(self):
+        for index in range(20):
+            response = self.client.post(
+                self.url,
+                {"email": f"unknown-{index}@example.test", "password": "incorrecta"},
+                format="json",
+                REMOTE_ADDR="192.0.2.25",
+            )
+            self.assertEqual(response.status_code, 400)
+
+        blocked = self.client.post(
+            self.url,
+            {"email": "another@example.test", "password": "incorrecta"},
+            format="json",
+            REMOTE_ADDR="192.0.2.25",
+        )
+
+        self.assertEqual(blocked.status_code, 429)
+
+    def test_untrusted_forwarded_for_header_does_not_define_client_ip(self):
+        for index in range(21):
+            response = self.client.post(
+                self.url,
+                {"email": f"spoof-{index}@example.test", "password": "incorrecta"},
+                format="json",
+                REMOTE_ADDR=f"192.0.2.{index + 1}",
+                HTTP_X_FORWARDED_FOR="198.51.100.99",
+            )
+            self.assertEqual(response.status_code, 400)
+
+
+class SecureSessionApiTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            email="sesion-segura@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.ADMINISTRADOR,
+        )
+        self.client = APIClient(enforce_csrf_checks=True)
+
+    def csrf_headers(self):
+        response = self.client.get(reverse("users:csrf"))
+        self.assertEqual(response.status_code, 204)
+        token = self.client.cookies["csrftoken"].value
+        return {"HTTP_X_CSRFTOKEN": token}
+
+    def login(self):
+        return self.client.post(
+            reverse("users:login"),
+            {"email": self.user.email, "password": "ContraseñaSegura123!"},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+    def test_login_requires_csrf_and_keeps_refresh_out_of_json(self):
+        rejected = self.client.post(
+            reverse("users:login"),
+            {"email": self.user.email, "password": "ContraseñaSegura123!"},
+            format="json",
+        )
+        accepted = self.login()
+
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(accepted.status_code, 200)
+        self.assertIn("access", accepted.data)
+        self.assertNotIn("refresh", accepted.data)
+        cookie = accepted.cookies["dentalclinic_refresh"]
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")
+        self.assertEqual(cookie["path"], "/api/auth/")
+        self.assertEqual(cookie["max-age"], 28800)
+
+    def test_refresh_uses_cookie_rotates_it_and_rejects_reuse(self):
+        login = self.login()
+        previous_refresh = login.cookies["dentalclinic_refresh"].value
+        absolute_expiry = RefreshToken(previous_refresh)["session_expires_at"]
+
+        refreshed = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+        self.assertEqual(refreshed.status_code, 200)
+        self.assertIn("access", refreshed.data)
+        self.assertNotIn("refresh", refreshed.data)
+        self.assertNotEqual(
+            refreshed.cookies["dentalclinic_refresh"].value,
+            previous_refresh,
+        )
+        rotated = RefreshToken(refreshed.cookies["dentalclinic_refresh"].value)
+        self.assertEqual(rotated["exp"], absolute_expiry)
+        with self.assertRaises(TokenError):
+            RefreshToken(previous_refresh).check_blacklist()
+
+    def test_refresh_and_logout_reject_missing_csrf(self):
+        login = self.login()
+
+        rejected_refresh = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+        rejected_logout = self.client.post(
+            reverse("users:logout"),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(rejected_refresh.status_code, 403)
+        self.assertEqual(rejected_logout.status_code, 403)
+
+    def test_refresh_rejects_revoked_token_version(self):
+        self.login()
+        self.user.token_version += 1
+        self.user.save(update_fields=["token_version"])
+
+        response = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_refresh_rejects_an_inactive_user(self):
+        self.login()
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_logout_uses_cookie_without_body_and_revokes_access(self):
+        login = self.login()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        response = self.client.post(
+            reverse("users:logout"),
+            {},
+            format="json",
+            **self.csrf_headers(),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.cookies["dentalclinic_refresh"]["max-age"], 0)
+        self.assertEqual(self.client.get(reverse("users:current-user")).status_code, 401)
+
+    def test_password_change_clears_the_refresh_cookie(self):
+        login = self.login()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
+
+        response = self.client.post(
+            reverse("users:password-change"),
+            {
+                "current_password": "ContraseñaSegura123!",
+                "new_password": "ContraseñaNueva456!",
+                "confirm_password": "ContraseñaNueva456!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.cookies["dentalclinic_refresh"]["max-age"], 0)
 
 
 class CurrentUserProfileApiTests(APITestCase):
@@ -263,22 +498,24 @@ class CurrentUserProfileApiTests(APITestCase):
         ))
         first_url = uploaded.data["avatar_url"]
 
-        replaced = self.client.patch(
-            reverse("users:current-user"),
-            {"avatar": profile_image("replacement.png")},
-            format="multipart",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            replaced = self.client.patch(
+                reverse("users:current-user"),
+                {"avatar": profile_image("replacement.png")},
+                format="multipart",
+            )
         self.assertEqual(replaced.status_code, 200)
         self.user.refresh_from_db()
         self.assertNotEqual(self.user.avatar.name, first_name)
         self.assertFalse(self.user.avatar.storage.exists(first_name))
         self.assertNotEqual(replaced.data["avatar_url"], first_url)
 
-        removed = self.client.patch(
-            reverse("users:current-user"),
-            {"remove_avatar": True},
-            format="multipart",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            removed = self.client.patch(
+                reverse("users:current-user"),
+                {"remove_avatar": True},
+                format="multipart",
+            )
         self.assertEqual(removed.status_code, 200)
         self.user.refresh_from_db()
         self.assertFalse(self.user.avatar)
@@ -620,11 +857,11 @@ class UserRegistrationApiTests(APITestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.data), 3)
-        for user in response.data:
+        self.assertEqual(response.data["count"], 3)
+        for user in response.data["results"]:
             self.assertIn("role", user)
             self.assertIn("is_active", user)
-        users_by_email = {user["email"]: user for user in response.data}
+        users_by_email = {user["email"]: user for user in response.data["results"]}
         self.assertEqual(
             users_by_email["activo@dentalclinic.com"]["role"],
             User.Role.ODONTOLOGO,
@@ -636,6 +873,116 @@ class UserRegistrationApiTests(APITestCase):
         )
         self.assertFalse(users_by_email["inactivo@dentalclinic.com"]["is_active"])
         self.assertIn("admin-users@dentalclinic.com", users_by_email)
+
+    def test_staff_list_is_paginated(self):
+        User.objects.create_user(
+            email="uno@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        User.objects.create_user(
+            email="dos@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(self.url, {"page_size": 2})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 3)
+        self.assertEqual(len(response.data["results"]), 2)
+        self.assertIsNotNone(response.data["next"])
+
+    def test_staff_list_filters_active_archived_and_all_users(self):
+        active = User.objects.create_user(
+            email="activo-filtro@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        archived = User.objects.create_user(
+            email="archivado-filtro@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            role=User.Role.RECEPCIONISTA,
+            is_active=False,
+        )
+        self.client.force_authenticate(self.admin)
+
+        active_response = self.client.get(self.url, {"status": "active"})
+        archived_response = self.client.get(self.url, {"status": "archived"})
+        all_response = self.client.get(self.url, {"status": "all"})
+
+        self.assertEqual(active_response.status_code, 200)
+        self.assertEqual(
+            {item["id"] for item in active_response.data["results"]},
+            {self.admin.pk, active.pk},
+        )
+        self.assertEqual(archived_response.status_code, 200)
+        self.assertEqual(
+            [item["id"] for item in archived_response.data["results"]],
+            [archived.pk],
+        )
+        self.assertEqual(all_response.status_code, 200)
+        self.assertEqual(all_response.data["count"], 3)
+
+    def test_staff_status_filter_is_applied_before_pagination(self):
+        for index in range(4):
+            User.objects.create_user(
+                email=f"archivado-{index}@dentalclinic.com",
+                password="ContraseñaSegura123!",
+                role=User.Role.RECEPCIONISTA,
+                is_active=False,
+            )
+        for index in range(2):
+            User.objects.create_user(
+                email=f"activo-{index}@dentalclinic.com",
+                password="ContraseñaSegura123!",
+                role=User.Role.ODONTOLOGO,
+            )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(
+            self.url,
+            {"status": "active", "page": 2, "page_size": 2},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 3)
+        self.assertEqual(len(response.data["results"]), 1)
+        self.assertTrue(all(item["is_active"] for item in response.data["results"]))
+
+    def test_staff_search_is_combined_with_the_active_status_filter(self):
+        active_match = User.objects.create_user(
+            email="ana.activa@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Ana",
+            last_name="Activa",
+            role=User.Role.ODONTOLOGO,
+        )
+        User.objects.create_user(
+            email="ana.archivada@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Ana",
+            last_name="Archivada",
+            role=User.Role.RECEPCIONISTA,
+            is_active=False,
+        )
+        User.objects.create_user(
+            email="bruno@dentalclinic.com",
+            password="ContraseñaSegura123!",
+            first_name="Bruno",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get(
+            self.url,
+            {"status": "active", "search": "Ana"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], active_match.pk)
 
     def test_administrator_creates_a_login_ready_user_without_exposing_password(self):
         self.client.force_authenticate(self.admin)
@@ -725,6 +1072,102 @@ class UserRegistrationApiTests(APITestCase):
         self.assertTrue(member.check_password("ContraseñaOriginal123!"))
         self.assertNotIn("password", response.data)
 
+    def test_hu06_administrator_changes_password_and_revokes_existing_sessions(self):
+        member = User.objects.create_user(
+            email="cambiar-clave@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        login = self.client.post(
+            reverse("users:login"),
+            {"email": member.email, "password": "ContraseñaOriginal123!"},
+            format="json",
+        )
+        old_access = login.data["access"]
+        old_refresh = login.cookies["dentalclinic_refresh"].value
+        original_token_version = member.token_version
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+            {
+                "new_password": "NuevaClaveSegura456!",
+                "confirm_password": "NuevaClaveSegura456!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        member.refresh_from_db()
+        self.assertTrue(member.check_password("NuevaClaveSegura456!"))
+        self.assertEqual(member.token_version, original_token_version + 1)
+        self.assertNotIn("new_password", response.data)
+        self.assertNotIn("confirm_password", response.data)
+
+        self.client.force_authenticate(user=None)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {old_access}")
+        revoked_session = self.client.get(reverse("users:current-user"))
+        self.assertEqual(revoked_session.status_code, 401)
+
+        self.client.credentials()
+        refreshed = self.client.post(
+            reverse("users:token-refresh"),
+            {},
+            format="json",
+        )
+        self.assertEqual(refreshed.status_code, 401)
+
+    def test_hu06_password_change_rejects_mismatch_without_mutating_user(self):
+        member = User.objects.create_user(
+            email="clave-distinta@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        original_token_version = member.token_version
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+            {
+                "new_password": "NuevaClaveSegura456!",
+                "confirm_password": "OtraClaveSegura789!",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("confirm_password", response.data)
+        member.refresh_from_db()
+        self.assertTrue(member.check_password("ContraseñaOriginal123!"))
+        self.assertEqual(member.token_version, original_token_version)
+
+    def test_hu06_password_change_rejects_weak_or_incomplete_credentials(self):
+        member = User.objects.create_user(
+            email="clave-invalida@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.client.force_authenticate(self.admin)
+        url = reverse("users:user-detail", kwargs={"pk": member.pk})
+
+        weak_response = self.client.patch(
+            url,
+            {"new_password": "123", "confirm_password": "123"},
+            format="json",
+        )
+        incomplete_response = self.client.patch(
+            url,
+            {"new_password": "NuevaClaveSegura456!"},
+            format="json",
+        )
+
+        self.assertEqual(weak_response.status_code, 400)
+        self.assertIn("new_password", weak_response.data)
+        self.assertEqual(incomplete_response.status_code, 400)
+        self.assertIn("confirm_password", incomplete_response.data)
+        member.refresh_from_db()
+        self.assertTrue(member.check_password("ContraseñaOriginal123!"))
+
     def test_hu07_deactivation_preserves_user_and_blocks_login(self):
         password = "ContraseñaOriginal123!"
         member = User.objects.create_user(
@@ -735,6 +1178,21 @@ class UserRegistrationApiTests(APITestCase):
             role=User.Role.RECEPCIONISTA,
         )
         original_id = member.pk
+        patient = Patient.objects.create(
+            first_name="Paciente",
+            last_name="Histórico",
+            birth_place="Managua",
+            gender=Patient.Gender.FEMENINO,
+            date_of_birth=datetime(1990, 1, 1).date(),
+            registered_by=member,
+        )
+        original_values = (
+            member.email,
+            member.first_name,
+            member.last_name,
+            member.role,
+            member.token_version,
+        )
         self.client.force_authenticate(self.admin)
 
         response = self.client.patch(
@@ -746,6 +1204,18 @@ class UserRegistrationApiTests(APITestCase):
         self.assertEqual(response.status_code, 200)
         member.refresh_from_db()
         self.assertFalse(member.is_active)
+        self.assertEqual(
+            (
+                member.email,
+                member.first_name,
+                member.last_name,
+                member.role,
+                member.token_version,
+            ),
+            (*original_values[:-1], original_values[-1] + 1),
+        )
+        patient.refresh_from_db()
+        self.assertEqual(patient.registered_by_id, original_id)
         self.assertTrue(
             User.objects.filter(
                 pk=original_id,
@@ -755,6 +1225,8 @@ class UserRegistrationApiTests(APITestCase):
                 role=User.Role.RECEPCIONISTA,
             ).exists()
         )
+        event = AuditEvent.objects.get(request_id=response["X-Request-ID"])
+        self.assertEqual(event.action, "USER_ARCHIVED")
 
         self.client.force_authenticate(user=None)
         login = self.client.post(
@@ -769,9 +1241,46 @@ class UserRegistrationApiTests(APITestCase):
             "Correo electrónico o contraseña incorrectos.",
         )
 
-    def test_hu07_user_detail_does_not_allow_deletion(self):
+    def test_administrator_reactivates_the_same_archived_user(self):
         member = User.objects.create_user(
-            email="conservar@dentalclinic.com",
+            email="reactivar@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+            is_active=False,
+        )
+        original_id = member.pk
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+            {"is_active": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        member.refresh_from_db()
+        self.assertEqual(member.pk, original_id)
+        self.assertTrue(member.is_active)
+        event = AuditEvent.objects.get(request_id=response["X-Request-ID"])
+        self.assertEqual(event.action, "USER_REACTIVATED")
+
+    def test_administrator_cannot_archive_their_own_account(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            reverse("users:user-detail", kwargs={"pk": self.admin.pk}),
+            {"is_active": False},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("is_active", response.data)
+        self.admin.refresh_from_db()
+        self.assertTrue(self.admin.is_active)
+
+    def test_administrator_deletes_an_unreferenced_user(self):
+        member = User.objects.create_user(
+            email="eliminar@dentalclinic.com",
             password="ContraseñaOriginal123!",
             role=User.Role.ODONTOLOGO,
         )
@@ -781,7 +1290,68 @@ class UserRegistrationApiTests(APITestCase):
             reverse("users:user-detail", kwargs={"pk": member.pk}),
         )
 
-        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(User.objects.filter(pk=member.pk).exists())
+
+    def test_administrator_cannot_delete_their_own_account(self):
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(
+            reverse("users:user-detail", kwargs={"pk": self.admin.pk}),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["detail"],
+            "No puedes eliminar tu propia cuenta.",
+        )
+        self.assertTrue(User.objects.filter(pk=self.admin.pk).exists())
+
+    def test_administrator_cannot_delete_a_user_with_clinical_history(self):
+        member = User.objects.create_user(
+            email="con-historial@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        Patient.objects.create(
+            first_name="Ana",
+            last_name="Pérez",
+            birth_place="Managua",
+            gender=Patient.Gender.FEMENINO,
+            date_of_birth=datetime(1990, 1, 1).date(),
+            registered_by=member,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.delete(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.data["detail"],
+            "Este usuario tiene historial asociado y no puede eliminarse. Desactívalo para conservar la trazabilidad.",
+        )
+        self.assertTrue(User.objects.filter(pk=member.pk).exists())
+
+    def test_non_administrator_cannot_delete_a_user(self):
+        receptionist = User.objects.create_user(
+            email="recepcion-eliminar@dentalclinic.com",
+            password="ContraseñaRecepcion123!",
+            role=User.Role.RECEPCIONISTA,
+        )
+        member = User.objects.create_user(
+            email="objetivo-eliminar@dentalclinic.com",
+            password="ContraseñaOriginal123!",
+            role=User.Role.ODONTOLOGO,
+        )
+        self.client.force_authenticate(receptionist)
+
+        response = self.client.delete(
+            reverse("users:user-detail", kwargs={"pk": member.pk}),
+        )
+
+        self.assertEqual(response.status_code, 403)
         self.assertTrue(User.objects.filter(pk=member.pk).exists())
 
     def test_update_rejects_an_email_used_by_another_user(self):
@@ -816,13 +1386,13 @@ class UserRegistrationApiTests(APITestCase):
 
         response = self.client.patch(
             reverse("users:user-detail", kwargs={"pk": self.admin.pk}),
-            {"first_name": "Alterado"},
+            {"is_active": False},
             format="json",
         )
 
         self.assertEqual(response.status_code, 403)
         self.admin.refresh_from_db()
-        self.assertEqual(self.admin.first_name, "Admin")
+        self.assertTrue(self.admin.is_active)
 
 
 class RolePermissionPresetApiTests(APITestCase):
@@ -869,6 +1439,35 @@ class RolePermissionPresetApiTests(APITestCase):
             {preset["role"] for preset in response.data["presets"]},
             {User.Role.RECEPCIONISTA, User.Role.ODONTOLOGO},
         )
+
+    def test_hu01_administrative_capabilities_are_effective_but_not_delegable(self):
+        self.client.force_authenticate(self.admin)
+
+        profile = self.client.get(reverse("users:current-user"))
+        catalog = self.client.get(self.list_url)
+        delegated = self.client.patch(
+            f"{self.list_url}{User.Role.RECEPCIONISTA}/",
+            {"permissions": ["clinic.manage", "users.manage"]},
+            format="json",
+        )
+
+        self.assertEqual(profile.status_code, 200)
+        self.assertIn("clinic.manage", profile.data["permissions"])
+        self.assertIn("users.manage", profile.data["permissions"])
+        self.assertNotIn(
+            "clinic.manage",
+            [item["code"] for item in catalog.data["available_permissions"]],
+        )
+        self.assertNotIn(
+            "users.manage",
+            [item["code"] for item in catalog.data["available_permissions"]],
+        )
+        self.assertEqual(delegated.status_code, 400)
+
+        self.client.force_authenticate(self.receptionist)
+        operational_profile = self.client.get(reverse("users:current-user"))
+        self.assertNotIn("clinic.manage", operational_profile.data["permissions"])
+        self.assertNotIn("users.manage", operational_profile.data["permissions"])
 
     def test_hu09_administrator_replaces_a_role_permission_preset(self):
         self.client.force_authenticate(self.admin)

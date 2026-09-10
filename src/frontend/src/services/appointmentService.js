@@ -1,4 +1,5 @@
 import { apiRequest } from './api'
+import { collectPaginatedResults } from './pagination'
 
 const authorization = (access) => ({ Authorization: `Bearer ${access}` })
 
@@ -16,6 +17,10 @@ export const listAppointments = (access, filters = {}) => apiRequest(
   { headers: authorization(access) },
 )
 
+export const listAllAppointments = (access, filters = {}) => collectPaginatedResults(
+  (page, pageSize) => listAppointments(access, { ...filters, page, page_size: pageSize }),
+)
+
 export const getAppointment = (access, id) => apiRequest(`/api/appointments/${id}/`, {
   headers: authorization(access),
 })
@@ -31,6 +36,29 @@ export const updateAppointment = (access, id, changes) => apiRequest(`/api/appoi
   body: JSON.stringify(changes),
   headers: authorization(access),
 })
+
+export const startAppointmentAttendance = (access, id) => apiRequest(
+  `/api/appointments/${id}/start-attendance/`,
+  {
+    method: 'POST',
+    headers: authorization(access),
+  },
+)
+
+export const checkInAppointment = (access, id) => apiRequest(
+  `/api/appointments/${id}/check-in/`,
+  {
+    method: 'POST',
+    headers: authorization(access),
+  },
+)
+
+export const listAppointmentReschedules = (access, id) => collectPaginatedResults(
+  (page, pageSize) => apiRequest(
+    `/api/appointments/${id}/reschedule-history/${queryString({ page, page_size: pageSize })}`,
+    { headers: authorization(access) },
+  ),
+)
 
 export const getAvailableDentists = (access, values) => apiRequest(
   `/api/appointments/dentists/availability/${queryString({

@@ -1,12 +1,19 @@
 import { NavLink } from 'react-router-dom'
 import logo from '../assets/logo_login.svg'
+import { useAuth } from '../context/authContextValue'
 import { useClinic } from '../context/clinicContextValue'
+import { hasAnyCapability, hasCapability } from '../utils/capabilities'
 
 const menuItems = [
   { to: '/bienvenida', label: 'Dashboard', icon: 'dashboard' },
-  { to: '/pacientes', label: 'Pacientes', icon: 'patients' },
-  { to: '/citas', label: 'Citas', icon: 'appointments' },
-  { to: '/configuracion', label: 'Configuración', icon: 'settings' },
+  { to: '/pacientes', label: 'Pacientes', icon: 'patients', capability: 'patients.view' },
+  { to: '/citas', label: 'Citas', icon: 'appointments', capability: 'appointments.view' },
+  {
+    to: '/configuracion',
+    label: 'Configuración',
+    icon: 'settings',
+    anyCapabilities: ['clinic.manage', 'users.manage'],
+  },
 ]
 
 function MenuIcon({ name }) {
@@ -26,6 +33,11 @@ function MenuIcon({ name }) {
 
 export default function Sidebar() {
   const { profile } = useClinic()
+  const { user } = useAuth()
+  const visibleItems = menuItems.filter(({ capability, anyCapabilities }) => (
+    (!capability || hasCapability(user, capability))
+    && (!anyCapabilities || hasAnyCapability(user, anyCapabilities))
+  ))
   return (
     <aside className="w-full shrink-0 border-b border-slate-200 bg-white px-4 py-4 md:min-h-screen md:w-56 md:border-b-0 md:border-r md:px-5 md:py-6">
       <div className="mb-4 flex items-center justify-between md:mb-7 md:block">
@@ -35,7 +47,7 @@ export default function Sidebar() {
       </div>
       <nav aria-label="Navegación principal">
         <ul className="m-0 flex list-none gap-1 overflow-x-auto p-0 md:block md:space-y-1.5">
-          {menuItems.map(({ to, label, icon }) => (
+          {visibleItems.map(({ to, label, icon }) => (
             <li key={to} className="shrink-0">
               <NavLink
                 to={to}

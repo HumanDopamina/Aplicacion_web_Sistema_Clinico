@@ -37,6 +37,12 @@ class User(AbstractUser):
     email = models.EmailField("correo electrónico", unique=True)
     role = models.CharField(max_length=20, choices=Role.choices)
     phone = models.CharField("teléfono", max_length=30, blank=True)
+    specialty = models.CharField("especialidad", max_length=200, blank=True)
+    professional_registration_number = models.CharField(
+        "número de registro profesional",
+        max_length=100,
+        blank=True,
+    )
     avatar = models.ImageField(
         upload_to=user_avatar_path,
         storage=private_avatar_storage,
@@ -70,3 +76,10 @@ class RolePermissionPreset(models.Model):
 
     def __str__(self):
         return self.get_role_display()
+
+
+class PendingFileDeletion(models.Model):
+    storage_kind = models.CharField(max_length=10, choices=(("avatar", "Avatar"), ("logo", "Logo")))
+    name = models.CharField(max_length=512)
+    attempts = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)

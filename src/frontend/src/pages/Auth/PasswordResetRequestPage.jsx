@@ -3,8 +3,10 @@ import { Link } from 'react-router-dom'
 import AuthRecoveryShell from '../../components/AuthRecoveryShell'
 import CustomButton from '../../components/CustomButton'
 import { requestPasswordReset } from '../../services/authService'
+import { useSystemFeatures } from '../../context/systemFeaturesValue'
 
 export default function PasswordResetRequestPage() {
+  const { password_reset: passwordResetEnabled } = useSystemFeatures()
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -25,6 +27,7 @@ export default function PasswordResetRequestPage() {
     }
   }
 
+  if (!passwordResetEnabled) return <AuthRecoveryShell title="Recuperación en la demo" subtitle="Solicita al administrador que cambie tu contraseña."><Link to="/login">Volver al inicio</Link></AuthRecoveryShell>
   return (
     <AuthRecoveryShell
       currentStep={0}

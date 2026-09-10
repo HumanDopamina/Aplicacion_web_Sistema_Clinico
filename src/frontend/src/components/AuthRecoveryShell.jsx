@@ -1,4 +1,4 @@
-import image from '../assets/imagen_login.png'
+import image from '../assets/imagen_login.webp'
 import logo from '../assets/logo_login.svg'
 
 const steps = ['Solicitud', 'Correo', 'Nueva contraseña']
@@ -7,7 +7,7 @@ export default function AuthRecoveryShell({ currentStep, title, subtitle, childr
   return (
     <main className="min-h-screen bg-[#f4f8fb] text-[#1e2933] md:grid md:grid-cols-[minmax(300px,42%)_1fr]">
       <aside className="relative hidden overflow-hidden md:block">
-        <img src={image} alt="" className="absolute inset-0 h-full w-full object-cover" />
+        <img src={image} alt="" width="720" height="1023" className="absolute inset-0 h-full w-full object-cover" />
         <div className="absolute inset-0 bg-[linear-gradient(155deg,rgba(8,67,111,.9),rgba(18,105,173,.7))]" />
         <div className="relative flex h-full flex-col justify-end p-10 text-white lg:p-14">
           <p className="mb-3 text-xs font-bold uppercase tracking-[.22em] text-blue-100">Acceso protegido</p>
@@ -24,7 +24,7 @@ export default function AuthRecoveryShell({ currentStep, title, subtitle, childr
       </aside>
       <section className="grid min-h-screen place-items-center px-5 py-10 sm:px-8">
         <div className="w-full max-w-[430px]">
-          <img src={logo} className="mb-10 w-[170px]" alt="DentalClinic" />
+          <img src={logo} width="560" height="144" className="mb-10 h-auto w-[170px]" alt="DentalClinic" />
           <p className="mb-2 text-xs font-bold uppercase tracking-[.18em] text-[#1269ad]">Recuperación segura</p>
           <h1 className="m-0 text-3xl font-semibold tracking-[-.02em]">{title}</h1>
           <p className="mb-8 mt-3 leading-6 text-[#64717d]">{subtitle}</p>

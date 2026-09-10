@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { changePassword, confirmPasswordReset, logout, requestPasswordReset } from './authService'
 
+const apiUrl = `${window.location.protocol}//${window.location.hostname}:8000`
+
 describe('authService.logout', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('revokes the refresh token using the authenticated API endpoint', async () => {
+  it('revokes the cookie refresh without sending it in the request body', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 204,
@@ -12,13 +14,15 @@ describe('authService.logout', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    await logout({ access: 'access-token', refresh: 'refresh-token' })
+    await logout({ access: 'access-token' })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/logout/',
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${apiUrl}/api/auth/logout/`,
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ refresh: 'refresh-token' }),
+        body: JSON.stringify({}),
+        credentials: 'include',
         headers: expect.objectContaining({ Authorization: 'Bearer access-token' }),
       }),
     )
@@ -39,7 +43,7 @@ describe('password reset services', () => {
     await requestPasswordReset({ email: 'user@test.com' })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/password-reset/',
+      `${apiUrl}/api/auth/password-reset/`,
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ email: 'user@test.com' }),
@@ -64,7 +68,7 @@ describe('password reset services', () => {
     await confirmPasswordReset(payload)
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/password-reset/confirm/',
+      `${apiUrl}/api/auth/password-reset/confirm/`,
       expect.objectContaining({ method: 'POST', body: JSON.stringify(payload) }),
     )
   })
@@ -104,7 +108,7 @@ describe('authService.changePassword', () => {
     await changePassword({ access: 'access-token', ...credentials })
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:8000/api/auth/password-change/',
+      `${apiUrl}/api/auth/password-change/`,
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify(credentials),
