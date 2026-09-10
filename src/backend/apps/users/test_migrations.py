@@ -1,9 +1,10 @@
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+
+from apps.common.test_utils import MigrationTestCase
 
 
-class AppointmentEditPermissionMigrationTests(TransactionTestCase):
+class AppointmentEditPermissionMigrationTests(MigrationTestCase):
     migrate_from = ("users", "0005_consultation_permissions")
     migrate_to = ("users", "0006_appointment_edit_permission")
 
@@ -16,11 +17,6 @@ class AppointmentEditPermissionMigrationTests(TransactionTestCase):
         preset, _ = preset_model.objects.get_or_create(role="RECEPCIONISTA")
         preset.permissions = ["appointments.view", "appointments.create"]
         preset.save(update_fields=["permissions"])
-
-    def tearDown(self):
-        executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        super().tearDown()
 
     def test_hu18_adds_edit_to_reception_presets_that_can_create_appointments(self):
         self.executor = MigrationExecutor(connection)
@@ -36,7 +32,7 @@ class AppointmentEditPermissionMigrationTests(TransactionTestCase):
         )
 
 
-class AppointmentViewAllPermissionMigrationTests(TransactionTestCase):
+class AppointmentViewAllPermissionMigrationTests(MigrationTestCase):
     migrate_from = ("users", "0007_document_permissions")
     migrate_to = ("users", "0008_appointment_view_all_permission")
 
@@ -54,11 +50,6 @@ class AppointmentViewAllPermissionMigrationTests(TransactionTestCase):
             role="ODONTOLOGO",
             defaults={"permissions": ["appointments.view"]},
         )
-
-    def tearDown(self):
-        executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        super().tearDown()
 
     def test_adds_view_all_to_reception_only(self):
         self.executor = MigrationExecutor(connection)

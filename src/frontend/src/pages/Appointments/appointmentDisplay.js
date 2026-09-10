@@ -104,6 +104,8 @@ export const minutesFromClock = (value) => {
 export const statusTone = {
   PROGRAMADA: 'bg-blue-50 text-blue-700 ring-blue-200',
   CONFIRMADA: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  PRESENTE: 'bg-violet-50 text-violet-700 ring-violet-200',
+  EN_ATENCION: 'bg-violet-50 text-violet-700 ring-violet-200',
   COMPLETADA: 'bg-slate-100 text-slate-700 ring-slate-200',
   CANCELADA: 'bg-red-50 text-red-700 ring-red-200',
   NO_ASISTIO: 'bg-amber-50 text-amber-800 ring-amber-200',

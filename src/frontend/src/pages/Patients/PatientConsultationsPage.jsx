@@ -27,6 +27,6 @@ export default function PatientConsultationsPage() {
     <Link to="/pacientes" className="mb-5 inline-flex text-sm font-medium text-slate-600 no-underline hover:text-blue-700">← Volver a pacientes</Link>
     <PatientHeader patient={patient} title={patient.full_name} initials={patientInitials(patient)} isActive={patient.is_active} identityText={patientIdentity(patient)} />
     <PatientTabs patientId={patient.id} active="consultations" />
-    <PatientConsultationsPanel accessToken={accessToken} patientId={patient.id} />
+    <PatientConsultationsPanel accessToken={accessToken} patientId={patient.id} patientActive={patient.is_active} />
   </div>
 }

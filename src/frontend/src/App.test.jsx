@@ -8,7 +8,7 @@ import * as authService from './services/authService'
 vi.mock('./services/authService')
 
 const rolePermissions = {
-  ADMINISTRADOR: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'consultations.create', 'consultations.edit', 'appointments.view', 'appointments.create', 'appointments.edit'],
+  ADMINISTRADOR: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'consultations.create', 'consultations.edit', 'appointments.view', 'appointments.create', 'appointments.edit', 'clinic.manage', 'users.manage'],
   RECEPCIONISTA: ['patients.view', 'patients.create', 'patients.edit', 'consultations.view', 'appointments.view', 'appointments.create', 'appointments.edit'],
   ODONTOLOGO: ['patients.view', 'consultations.view', 'consultations.create', 'consultations.edit', 'appointments.view'],
 }
@@ -44,6 +44,9 @@ const patientFixture = {
   registered_by: 2,
   clinical_record: {
     id: 1, examiner_name: 'Dra. Elena Ruiz', examiner_national_id: '001-010180-0003C',
+    allergies: 'Penicilina — urticaria', current_medications: 'Losartán 50 mg',
+    relevant_conditions: 'Hipertensión controlada',
+    other_clinical_alerts: 'Antecedente de síncope durante procedimientos',
     inss_number: 'INSS-9081', cema_number: 'CEMA-4402', consultation_date: '2026-08-08',
     consultation_time: '09:30:00', dental_service: 'Valoración odontológica',
     chief_complaint: 'Dolor en molar inferior derecho.', present_illness_history: 'Dolor pulsátil de tres días.',
@@ -73,6 +76,8 @@ const consultationFixture = {
   consultation_type_display: 'Seguimiento',
   professional: 3,
   professional_name: 'Dra. Elena Rivera',
+  professional_specialty: 'Endodoncia',
+  professional_registration_number: 'REG-2048',
   summary: 'Paciente estable. Continúa con el tratamiento indicado.',
   status: 'COMPLETADA',
   status_display: 'Completada',
@@ -119,8 +124,20 @@ const consultationFixture = {
   treatment_plan: 'Tratamiento endodóntico.',
   budget: 'C$ 4,500.',
   treatment_performed: 'Radiografía diagnóstica.',
+  completed_at: '2026-08-08T16:45:00Z',
+  completed_by: 3,
+  completed_by_name: 'Dra. Elena Rivera',
   created_at: '2026-08-08T12:00:00Z',
   updated_at: '2026-08-08T12:00:00Z',
+}
+
+const inProgressConsultationFixture = {
+  ...consultationFixture,
+  status: 'EN_PROGRESO',
+  status_display: 'En progreso',
+  completed_at: null,
+  completed_by: null,
+  completed_by_name: '',
 }
 
 const session = (role) => ({
@@ -145,12 +162,49 @@ function BackControl() {
   return <button type="button" onClick={() => navigate(-1)}>Atrás</button>
 }
 
-function renderAuthenticated(role, withBackControl = false, path = '/bienvenida') {
-  sessionStorage.setItem('dentalclinic_session', JSON.stringify(session(role)))
+function renderAuthenticated(
+  role,
+  withBackControl = false,
+  path = '/bienvenida',
+  permissions = rolePermissions[role],
+  treatmentItems = [],
+) {
+  const configuredFetch = globalThis.fetch
+  if (vi.isMockFunction(configuredFetch)) {
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (
+        /\/api\/patients\/\d+\/treatment-items\/\?/.test(url)
+        && (!options.method || options.method === 'GET')
+      ) {
+        const scope = new URL(url, 'http://localhost').searchParams.get('scope')
+        const scopedItems = treatmentItems.filter(({ status }) => scope === 'history'
+          ? ['REALIZADO', 'CANCELADO'].includes(status)
+          : ['PROPUESTO', 'ACEPTADO'].includes(status))
+        return Promise.resolve(jsonResponse({
+          count: scopedItems.length,
+          next: null,
+          previous: null,
+          results: scopedItems,
+        }))
+      }
+      if (
+        url.includes('/treatment-items/')
+        && (!options.method || options.method === 'GET')
+      ) return Promise.resolve(jsonResponse(treatmentItems))
+      if (
+        url.includes('/api/clinics/services/?active=true')
+        && (!options.method || options.method === 'GET')
+      ) return Promise.resolve(jsonResponse([]))
+      return configuredFetch(url, options)
+    }))
+  }
+  const initialSession = session(role)
+  initialSession.user.permissions = permissions
+  authService.getCurrentSessionUser.mockResolvedValue(initialSession.user)
   const router = createMemoryRouter([{
     path: '*',
     element:
-      <AuthProvider>
+      <AuthProvider initialSession={initialSession}>
         {withBackControl ? <BackControl /> : null}
         <App />
       </AuthProvider>,
@@ -162,39 +216,89 @@ describe('authenticated routes', () => {
   beforeEach(() => {
     localStorage.clear()
     sessionStorage.clear()
+    authService.getCurrentSessionUser.mockReset()
+    authService.logout.mockReset()
     authService.logout.mockResolvedValue(undefined)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([])))
   })
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
   })
 
-  it.each(['ADMINISTRADOR', 'RECEPCIONISTA', 'ODONTOLOGO'])(
-    'shows the reference menu for %s',
-    (role) => {
+  it.each([
+    ['ADMINISTRADOR', ['Dashboard', 'Pacientes', 'Citas', 'Configuración']],
+    ['RECEPCIONISTA', ['Dashboard', 'Pacientes', 'Citas']],
+    ['ODONTOLOGO', ['Dashboard', 'Pacientes', 'Citas']],
+  ])('shows only the effective navigation for %s', (role, expectedLinks) => {
     renderAuthenticated(role)
 
     const navigation = within(screen.getByRole('navigation', { name: 'Navegación principal' }))
     const links = navigation.getAllByRole('link')
-    expect(links.map((link) => link.textContent.trim())).toEqual([
-      'Dashboard',
-      'Pacientes',
-      'Citas',
-      'Configuración',
-    ])
-    expect(navigation.getByRole('link', { name: 'Configuración' })).toHaveAttribute(
-      'href',
-      '/configuracion',
-    )
+    expect(links.map((link) => link.textContent.trim())).toEqual(expectedLinks)
+    if (role === 'ADMINISTRADOR') {
+      expect(navigation.getByRole('link', { name: 'Configuración' })).toHaveAttribute(
+        'href',
+        '/configuracion',
+      )
+    } else {
+      expect(navigation.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument()
+    }
     expect(navigation.queryByRole('link', { name: 'Usuarios' })).not.toBeInTheDocument()
     expect(navigation.queryByRole('link', { name: 'Clínicas' })).not.toBeInTheDocument()
+  })
+
+  it('hides modules independently when their effective view capability is absent', () => {
+    renderAuthenticated('RECEPCIONISTA', false, '/bienvenida', ['appointments.view'])
+
+    const navigation = within(screen.getByRole('navigation', { name: 'Navegación principal' }))
+    expect(navigation.queryByRole('link', { name: 'Pacientes' })).not.toBeInTheDocument()
+    expect(navigation.getByRole('link', { name: 'Citas' })).toBeInTheDocument()
+    expect(navigation.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument()
+  })
+
+  it('protects a patient URL when the effective permission is absent', () => {
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes', ['appointments.view'])
+
+    expect(screen.getByRole('heading', { name: 'Bienvenido, Dr. Usuario' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Pacientes' })).not.toBeInTheDocument()
+  })
+
+  it('[HU-43] removes and restores patient access after effective permissions change', async () => {
+    const revokedUser = {
+      ...session('RECEPCIONISTA').user,
+      permissions: ['appointments.view'],
     }
-  )
+    const restoredUser = {
+      ...revokedUser,
+      permissions: ['patients.view', 'appointments.view'],
+    }
+    authService.getCurrentSessionUser
+      .mockResolvedValueOnce(revokedUser)
+      .mockResolvedValueOnce(restoredUser)
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/')) return Promise.resolve(jsonResponse([]))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes')
+    expect(await screen.findByRole('heading', { name: 'Pacientes' })).toBeInTheDocument()
+
+    fireEvent.focus(window)
+
+    expect(await screen.findByRole('heading', { name: 'Bienvenido, Dr. Usuario' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Pacientes' })).not.toBeInTheDocument()
+
+    fireEvent.focus(window)
+
+    expect(await screen.findByRole('link', { name: 'Pacientes' })).toBeInTheDocument()
+  })
 
   it('clears the session and protects history after logout', async () => {
     renderAuthenticated('ADMINISTRADOR', true)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir menú de Usuario' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Cerrar sesión' }))
 
     expect(await screen.findByRole('heading', { name: 'Bienvenido' })).toBeInTheDocument()
     expect(localStorage.getItem('dentalclinic_session')).toBeNull()
@@ -219,14 +323,59 @@ describe('authenticated routes', () => {
     expect(screen.queryByRole('heading', { name: 'Configuración' })).not.toBeInTheDocument()
   })
 
-  it('offers password change navigation to every authenticated role', () => {
+  it('offers profile, password change and logout actions from the avatar menu', () => {
     renderAuthenticated('ODONTOLOGO')
 
-    expect(screen.getByRole('link', { name: 'Cambiar contraseña' })).toHaveAttribute(
+    fireEvent.click(screen.getByRole('button', { name: 'Abrir menú de Usuario' }))
+
+    expect(screen.getByRole('menuitem', { name: 'Mi perfil' })).toHaveAttribute('href', '/mi-perfil')
+    expect(screen.getByRole('menuitem', { name: 'Cambiar contraseña' })).toHaveAttribute(
       'href',
       '/cambiar-contrasena',
     )
+    expect(screen.getByRole('menuitem', { name: 'Cerrar sesión' })).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('menuitem', { name: 'Mi perfil' })).not.toBeInTheDocument()
   })
+
+  it.each([
+    ['/usuarios', 'staff'],
+    ['/clinicas', 'perfil'],
+  ])('redirects the legacy administrator route %s to functional configuration', async (path, section) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse([])))
+
+    const { router } = renderAuthenticated('ADMINISTRADOR', false, path)
+
+    expect(await screen.findByRole('heading', { name: 'Configuración' })).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/configuracion')
+    expect(router.state.location.search).toBe(`?seccion=${section}`)
+  })
+
+  it('does not render inactive notification or global-search controls', () => {
+    renderAuthenticated('ODONTOLOGO')
+
+    expect(screen.queryByRole('button', { name: 'Notificaciones' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('searchbox', { name: 'Buscar pacientes o citas' })).not.toBeInTheDocument()
+  })
+
+  it.each(['ADMINISTRADOR', 'RECEPCIONISTA', 'ODONTOLOGO'])(
+    'allows %s to open the personal profile route',
+    async (role) => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+        ...session(role).user,
+        id: 4,
+        last_name: 'Clínica',
+        phone: '',
+        avatar_url: '',
+      })))
+
+      renderAuthenticated(role, false, '/mi-perfil')
+
+      expect(await screen.findByRole('heading', { name: 'Mi perfil' })).toBeInTheDocument()
+      expect(screen.getByDisplayValue(`${role.toLowerCase()}@test.com`)).toBeInTheDocument()
+    },
+  )
 
   it('uses the clinic logo in the main navigation and opens on the dashboard', () => {
     renderAuthenticated('ODONTOLOGO')
@@ -239,6 +388,9 @@ describe('authenticated routes', () => {
   it('[HU-10] registers a patient and opens the new clinical record', async () => {
     let submittedPatient = null
     const fetchMock = vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/duplicate-check/') && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ has_matches: false, matches: [] }))
+      }
       if (url.endsWith('/api/patients/') && options.method === 'POST') {
         submittedPatient = JSON.parse(options.body)
         return Promise.resolve(jsonResponse(patientFixture, 201))
@@ -271,7 +423,8 @@ describe('authenticated routes', () => {
     fireEvent.change(screen.getByLabelText('Primer apellido'), { target: { value: 'García' } })
     fireEvent.change(screen.getByLabelText('Segundo apellido'), { target: { value: 'López' } })
     fireEvent.change(screen.getByLabelText('Lugar de nacimiento'), { target: { value: 'Managua' } })
-    fireEvent.change(screen.getByLabelText('Cédula'), { target: { value: '001-160498-0001A' } })
+    fireEvent.change(screen.getByLabelText('Tipo de identificación'), { target: { value: 'CEDULA' } })
+    fireEvent.change(screen.getByLabelText('Número de identificación'), { target: { value: '001-160498-0001A' } })
     fireEvent.change(screen.getByLabelText('Género'), { target: { value: 'FEMENINO' } })
     fireEvent.change(screen.getByLabelText('Fecha de nacimiento'), { target: { value: '1998-04-16' } })
     fireEvent.change(screen.getByLabelText('Antecedentes familiares'), { target: { value: 'Madre con hipertensión arterial.' } })
@@ -281,12 +434,201 @@ describe('authenticated routes', () => {
     expect(screen.getByText('PAC-00001')).toBeInTheDocument()
     expect(submittedPatient.clinical_record.family_history).toBe('Madre con hipertensión arterial.')
     expect(Object.keys(submittedPatient.clinical_record).sort()).toEqual([
+      'allergies',
       'clinical_photographs',
+      'current_medications',
       'family_history',
       'hereditary_diseases',
       'infectious_diseases',
+      'other_clinical_alerts',
       'radiographic_exams',
+      'relevant_conditions',
     ])
+  })
+
+  it('[HU-53] registers a patient without identification and does not submit the legacy field', async () => {
+    let submittedPatient = null
+    const patientWithoutIdentification = {
+      ...patientFixture,
+      identification_type: null,
+      identification_number: null,
+      profile_complete: true,
+      missing_profile_fields: [],
+    }
+    delete patientWithoutIdentification.national_id
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/duplicate-check/') && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ has_matches: false, matches: [] }))
+      }
+      if (url.endsWith('/api/patients/') && options.method === 'POST') {
+        submittedPatient = JSON.parse(options.body)
+        return Promise.resolve(jsonResponse(patientWithoutIdentification, 201))
+      }
+      if (url.endsWith('/api/patients/1/')) {
+        return Promise.resolve(jsonResponse(patientWithoutIdentification))
+      }
+      if (url.endsWith('/api/patients/')) return Promise.resolve(jsonResponse([]))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes/nuevo')
+
+    expect(screen.getByLabelText('Número de identificación')).not.toBeRequired()
+    fireEvent.change(screen.getByLabelText('Nombres'), { target: { value: 'Adriana' } })
+    fireEvent.change(screen.getByLabelText('Primer apellido'), { target: { value: 'López' } })
+    fireEvent.change(screen.getByLabelText('Lugar de nacimiento'), { target: { value: 'Masaya' } })
+    fireEvent.change(screen.getByLabelText('Género'), { target: { value: 'FEMENINO' } })
+    fireEvent.change(screen.getByLabelText('Fecha de nacimiento'), { target: { value: '1990-05-20' } })
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '8888-9090' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(submittedPatient).not.toBeNull())
+    expect(submittedPatient).toHaveProperty('identification_type')
+    expect(submittedPatient).toHaveProperty('identification_number')
+    expect(submittedPatient.identification_type || null).toBeNull()
+    expect(submittedPatient.identification_number || null).toBeNull()
+    expect(submittedPatient).not.toHaveProperty('national_id')
+  })
+
+  it('[HU-53] captures flexible identification and highlights guardian data for a minor', async () => {
+    let submittedPatient = null
+    const minorPatient = {
+      ...patientFixture,
+      first_name: 'Lucía',
+      full_name: 'Lucía García',
+      date_of_birth: '2015-06-10',
+      identification_type: 'PASAPORTE',
+      identification_number: 'PA-000071',
+      guardian_name: 'Marta García',
+      guardian_relationship: 'Madre',
+      guardian_phone: '8777-1234',
+      profile_complete: true,
+      missing_profile_fields: [],
+    }
+    delete minorPatient.national_id
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/duplicate-check/') && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ has_matches: false, matches: [] }))
+      }
+      if (url.endsWith('/api/patients/') && options.method === 'POST') {
+        submittedPatient = JSON.parse(options.body)
+        return Promise.resolve(jsonResponse(minorPatient, 201))
+      }
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(minorPatient))
+      if (url.endsWith('/api/patients/')) return Promise.resolve(jsonResponse([]))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes/nuevo')
+
+    expect(screen.getByRole('option', { name: 'Cédula' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Pasaporte' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Otro' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Nombres'), { target: { value: 'Lucía' } })
+    fireEvent.change(screen.getByLabelText('Primer apellido'), { target: { value: 'García' } })
+    fireEvent.change(screen.getByLabelText('Lugar de nacimiento'), { target: { value: 'Managua' } })
+    fireEvent.change(screen.getByLabelText('Género'), { target: { value: 'FEMENINO' } })
+    fireEvent.change(screen.getByLabelText('Fecha de nacimiento'), { target: { value: '2015-06-10' } })
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '8666-4321' } })
+    fireEvent.change(screen.getByLabelText('Tipo de identificación'), {
+      target: { value: 'PASAPORTE' },
+    })
+    fireEvent.change(screen.getByLabelText('Número de identificación'), {
+      target: { value: 'PA-000071' },
+    })
+
+    const guardianSection = screen.getByRole('region', { name: 'Responsable / Tutor' })
+    expect(within(guardianSection).getByText('Perfil administrativo incompleto')).toBeInTheDocument()
+    fireEvent.change(within(guardianSection).getByLabelText('Nombre del responsable'), {
+      target: { value: 'Marta García' },
+    })
+    fireEvent.change(within(guardianSection).getByLabelText('Parentesco del responsable'), {
+      target: { value: 'Madre' },
+    })
+    fireEvent.change(within(guardianSection).getByLabelText('Teléfono del responsable'), {
+      target: { value: '8777-1234' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(submittedPatient).not.toBeNull())
+    expect(submittedPatient).toMatchObject({
+      identification_type: 'PASAPORTE',
+      identification_number: 'PA-000071',
+      guardian_name: 'Marta García',
+      guardian_relationship: 'Madre',
+      guardian_phone: '8777-1234',
+    })
+    expect(submittedPatient).not.toHaveProperty('national_id')
+  })
+
+  it('[HU-28] shows longitudinal clinical alerts prominently in the patient record', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(patientFixture)))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1')
+
+    const banner = await screen.findByRole('region', { name: 'Alertas clínicas' })
+    expect(within(banner).getByText('Penicilina — urticaria')).toBeInTheDocument()
+    expect(within(banner).getByText('Losartán 50 mg')).toBeInTheDocument()
+    expect(within(banner).getByText('Hipertensión controlada')).toBeInTheDocument()
+    expect(within(banner).getByText('Antecedente de síncope durante procedimientos')).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'Alergias' })).not.toBeInTheDocument()
+  })
+
+  it('[HU-28] does not duplicate the legacy allergy flag beside the migrated alert', async () => {
+    const migratedPatient = {
+      ...patientFixture,
+      clinical_record: {
+        ...patientFixture.clinical_record,
+        allergies: 'Alergia registrada previamente; completar detalle',
+        hereditary_diseases: {
+          ...patientFixture.clinical_record.hereditary_diseases,
+          allergies: true,
+        },
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(migratedPatient)))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1')
+
+    expect(await screen.findByText('Información pendiente de completar')).toBeInTheDocument()
+    expect(screen.queryByText('allergies')).not.toBeInTheDocument()
+    expect(screen.getAllByText('Alergia registrada previamente; completar detalle')).toHaveLength(1)
+  })
+
+  it('[HU-28] edits and persists every clinical alert from the patient record', async () => {
+    let submittedChanges = null
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/') && options.method === 'PATCH') {
+        submittedChanges = JSON.parse(options.body)
+        return Promise.resolve(jsonResponse({
+          ...patientFixture,
+          ...submittedChanges,
+          clinical_record: submittedChanges.clinical_record,
+        }))
+      }
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes/1')
+
+    fireEvent.change(await screen.findByLabelText('Alergias'), { target: { value: 'Látex — dermatitis' } })
+    fireEvent.change(screen.getByLabelText('Medicamentos actuales'), { target: { value: 'Metformina 850 mg' } })
+    fireEvent.change(screen.getByLabelText('Condiciones médicas relevantes'), { target: { value: 'Diabetes tipo 2 controlada' } })
+    fireEvent.change(screen.getByLabelText('Otras alertas clínicas'), { target: { value: 'Citas matutinas' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(submittedChanges).not.toBeNull())
+    expect(submittedChanges.clinical_record.allergies).toBe('Látex — dermatitis')
+    expect(submittedChanges.clinical_record.current_medications).toBe('Metformina 850 mg')
+    expect(submittedChanges.clinical_record.relevant_conditions).toBe('Diabetes tipo 2 controlada')
+    expect(submittedChanges.clinical_record.other_clinical_alerts).toBe('Citas matutinas')
+  })
+
+  it('[HU-28] keeps clinical alerts behind patient-record permission', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderAuthenticated('RECEPCIONISTA', false, '/pacientes/1', ['appointments.view'])
+
+    expect(screen.getByRole('heading', { name: 'Bienvenido, Dr. Usuario' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Alertas clínicas' })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('/api/patients/'))).toBe(false)
   })
 
   it('[HU-10] keeps consultation-specific fields out of the clinical summary', async () => {
@@ -342,6 +684,22 @@ describe('authenticated routes', () => {
     const row = await screen.findByRole('row', { name: /08 ago 2026 Seguimiento Dra\. Elena Rivera/ })
     expect(within(row).getByText('Paciente estable. Continúa con el tratamiento indicado.')).toBeInTheDocument()
     expect(within(row).getByText('Completada')).toBeInTheDocument()
+  })
+
+  it('[HU-61] shows current professional context in the consultation header', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/12/')) {
+        return Promise.resolve(jsonResponse(consultationFixture))
+      }
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
+
+    expect(await screen.findByText('Dra. Elena Rivera')).toBeInTheDocument()
+    expect(screen.getByText('Endodoncia')).toBeInTheDocument()
+    expect(screen.getByText('REG-2048')).toBeInTheDocument()
   })
 
   it('shows guidance when the patient does not have consultations', async () => {
@@ -429,6 +787,171 @@ describe('authenticated routes', () => {
     expect(await screen.findByRole('heading', { name: 'Consultas del paciente' })).toBeInTheDocument()
   })
 
+  it('[HU-28] shows patient alerts in a consultation without copying them into it', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
+
+    const banner = await screen.findByRole('region', { name: 'Alertas clínicas' })
+    expect(within(banner).getByText('Penicilina — urticaria')).toBeInTheDocument()
+    expect(within(banner).getByText('Losartán 50 mg')).toBeInTheDocument()
+    expect(consultationFixture).not.toHaveProperty('allergies')
+    expect(consultationFixture).not.toHaveProperty('current_medications')
+  })
+
+  it('[HU-47] integrates the structured treatment plan into an editable consultation', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(inProgressConsultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
+
+    expect(await screen.findByRole('heading', { name: 'Plan de tratamiento' })).toBeInTheDocument()
+    expect(screen.getByText('No hay tratamientos pendientes.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Agregar tratamiento' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Aceptar|Realizar|Cancelar/ })).not.toBeInTheDocument()
+  })
+
+  it('[HU-48] accepts a proposal from a completed origin without reopening it', async () => {
+    const proposed = {
+      id: 9,
+      proposed_in: 12,
+      service: null,
+      description: 'Profilaxis clínica',
+      diagnosis_text: '',
+      tooth_code: null,
+      surfaces: [],
+      planned_finding: '',
+      status: 'PROPUESTO',
+      status_display: 'Propuesto',
+      unit_price_snapshot: null,
+      notes: '',
+      performed_in: null,
+      performed_at: null,
+      status_reason: '',
+    }
+    let accepted = false
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      if (url.endsWith('/treatment-items/9/accept/') && options.method === 'POST') {
+        accepted = true
+        return Promise.resolve(jsonResponse({
+          ...proposed,
+          status: 'ACEPTADO',
+          status_display: 'Aceptado',
+        }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated(
+      'ODONTOLOGO',
+      false,
+      '/pacientes/1/consultas/12',
+      rolePermissions.ODONTOLOGO,
+      [proposed],
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Aceptar Profilaxis clínica' }))
+
+    await waitFor(() => expect(accepted).toBe(true))
+    const updatedTreatment = await screen.findByRole('article', { name: 'Profilaxis clínica' })
+    expect(within(updatedTreatment).getByText('Aceptado')).toBeInTheDocument()
+    expect(screen.getAllByText('Completada')).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'Agregar tratamiento' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Realizar Profilaxis clínica' })).not.toBeInTheDocument()
+  })
+
+  it('[HU-49] shows the longitudinal plan in the patient record as read-only groups', async () => {
+    const items = [
+      {
+        id: 31,
+        proposed_in: { id: 8, date: '2026-07-10' },
+        performed_in: null,
+        performed_at: null,
+        description: 'Corona definitiva',
+        diagnosis_text: 'Fractura coronaria',
+        tooth_code: '11',
+        surfaces: [],
+        planned_finding: 'CROWN',
+        status: 'ACEPTADO',
+        status_display: 'Aceptado',
+        unit_price_snapshot: '4200.00',
+        notes: '',
+        status_reason: '',
+      },
+      {
+        id: 19,
+        proposed_in: { id: 4, date: '2026-05-12' },
+        performed_in: { id: 6, date: '2026-06-01' },
+        performed_at: '2026-06-01T15:00:00Z',
+        description: 'Profilaxis',
+        diagnosis_text: '',
+        tooth_code: null,
+        surfaces: [],
+        planned_finding: '',
+        status: 'REALIZADO',
+        status_display: 'Realizado',
+        unit_price_snapshot: '700.00',
+        notes: '',
+        status_reason: '',
+      },
+    ]
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1', rolePermissions.ODONTOLOGO, items)
+
+    const pendingGroup = await screen.findByRole('region', { name: 'Tratamientos pendientes' })
+    const historyGroup = screen.getByRole('region', { name: 'Historial de tratamientos' })
+    expect(within(pendingGroup).getByText('Corona definitiva')).toBeInTheDocument()
+    expect(within(pendingGroup).getByText(/Consulta #8/)).toBeInTheDocument()
+    expect(within(historyGroup).getByText('Profilaxis')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Aceptar|Realizar|Cancelar Corona/ })).not.toBeInTheDocument()
+  })
+
+  it('[HU-49] acts on an earlier proposal from the active consultation without duplicating it', async () => {
+    const activeConsultation = { ...inProgressConsultationFixture, id: 18, date: '2026-08-31' }
+    const proposed = {
+      id: 44,
+      proposed_in: { id: 12, date: '2026-08-08' },
+      performed_in: null,
+      performed_at: null,
+      description: 'Restauración pendiente previa',
+      diagnosis_text: 'Caries',
+      tooth_code: '16',
+      surfaces: ['OCCLUSAL'],
+      planned_finding: 'RESTORATION',
+      status: 'PROPUESTO',
+      status_display: 'Propuesto',
+      unit_price_snapshot: '850.00',
+      notes: '',
+      status_reason: '',
+    }
+    let actionUrl = ''
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/consultations/18/')) return Promise.resolve(jsonResponse(activeConsultation))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      if (url.endsWith('/consultations/12/treatment-items/44/accept/') && options.method === 'POST') {
+        actionUrl = url
+        return Promise.resolve(jsonResponse({ ...proposed, status: 'ACEPTADO', status_display: 'Aceptado' }))
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/18', rolePermissions.ODONTOLOGO, [proposed, proposed])
+
+    expect((await screen.findAllByText('Restauración pendiente previa'))).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Aceptar Restauración pendiente previa' }))
+
+    await waitFor(() => expect(actionUrl).toContain('/consultations/12/treatment-items/44/accept/'))
+    expect(await screen.findByText('Aceptado')).toBeInTheDocument()
+  })
+
   it('creates a consultation with the cloud and opens its detail', async () => {
     let submittedConsultation = null
     vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
@@ -454,23 +977,23 @@ describe('authenticated routes', () => {
     expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument()
   })
 
-  it('edits and discards a completed consultation inline', async () => {
+  it('edits and discards an in-progress consultation inline', async () => {
     let patchPayload = null
     vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
       if (url.endsWith('/api/patients/1/consultations/12/') && options.method === 'PATCH') {
         patchPayload = JSON.parse(options.body)
-        return Promise.resolve(jsonResponse({ ...consultationFixture, ...patchPayload }))
+        return Promise.resolve(jsonResponse({ ...inProgressConsultationFixture, ...patchPayload }))
       }
-      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(inProgressConsultationFixture))
       if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
       throw new Error(`Unexpected request: ${url}`)
     }))
     renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
 
-    expect(await screen.findByLabelText('Resumen')).toHaveValue(consultationFixture.summary)
+    expect(await screen.findByLabelText('Resumen')).toHaveValue(inProgressConsultationFixture.summary)
     fireEvent.change(screen.getByLabelText('Resumen'), { target: { value: 'Cambio descartado' } })
     fireEvent.click(screen.getByRole('button', { name: 'Descartar cambios' }))
-    expect(screen.getByLabelText('Resumen')).toHaveValue(consultationFixture.summary)
+    expect(screen.getByLabelText('Resumen')).toHaveValue(inProgressConsultationFixture.summary)
     expect(patchPayload).toBeNull()
 
     fireEvent.change(screen.getByLabelText('Resumen'), { target: { value: 'Control actualizado.' } })
@@ -478,6 +1001,128 @@ describe('authenticated routes', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument())
     expect(patchPayload.summary).toBe('Control actualizado.')
     expect(screen.getByLabelText('Resumen')).toHaveValue('Control actualizado.')
+  })
+
+  it('[HU-46] completes once after confirmation and switches the record to read-only', async () => {
+    let releaseCompletion
+    const completion = new Promise((resolve) => { releaseCompletion = resolve })
+    const fetchMock = vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/consultations/12/complete/') && options.method === 'POST') {
+        return completion
+      }
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(inProgressConsultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Completar consulta' }))
+    expect(screen.getByRole('dialog', { name: 'Completar consulta' })).toBeInTheDocument()
+    const confirm = screen.getByRole('button', { name: 'Confirmar cierre' })
+    fireEvent.click(confirm)
+    fireEvent.click(confirm)
+    expect(screen.getByRole('button', { name: 'Completando consulta' })).toBeDisabled()
+    expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/complete/'))).toHaveLength(1)
+
+    releaseCompletion(jsonResponse({ consultation: consultationFixture, appointment: null }))
+    expect(await screen.findByText('Cerrada el 8 ago 2026')).toBeInTheDocument()
+    expect(screen.getByText('Cerrada por Dra. Elena Rivera')).toBeInTheDocument()
+    expect(screen.getByText(consultationFixture.summary)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Resumen')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Guardar cambios' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Completar consulta' })).not.toBeInTheDocument()
+  })
+
+  it('[HU-51] offers optional follow-up after a completed manual consultation', async () => {
+    const pending = {
+      id: 15,
+      description: 'Restauración de resina',
+      diagnosis_text: 'No debe viajar a agenda',
+      notes: 'Contexto clínico privado',
+      tooth_code: '16',
+      surfaces: ['OCCLUSAL'],
+      status: 'ACEPTADO',
+      status_display: 'Aceptado',
+      service: {
+        id: 8,
+        name: 'Restauración simple',
+        category_name: 'Restauraciones',
+        duration_minutes: 45,
+        is_active: true,
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated(
+      'ODONTOLOGO',
+      false,
+      '/pacientes/1/consultas/12',
+      [...rolePermissions.ODONTOLOGO, 'appointments.create'],
+      [pending],
+    )
+
+    const followUp = await screen.findByRole('region', { name: 'Seguimiento de la atención' })
+    expect(within(followUp).getByText('Restauración de resina')).toBeInTheDocument()
+    expect(within(followUp).getByRole('button', { name: 'Programar próxima cita' })).toBeInTheDocument()
+  })
+
+  it('[HU-51] keeps the post-close CTA behind appointment creation permission', async () => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
+
+    const followUp = await screen.findByRole('region', { name: 'Seguimiento de la atención' })
+    expect(within(followUp).getByText('No hay tratamientos pendientes.')).toBeInTheDocument()
+    expect(within(followUp).queryByRole('button', { name: 'Programar próxima cita' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['EN_PROGRESO', inProgressConsultationFixture],
+    ['CANCELADA', { ...consultationFixture, status: 'CANCELADA', status_display: 'Cancelada' }],
+  ])('[HU-51] does not show post-close follow-up for %s', async (_status, consultation) => {
+    vi.stubGlobal('fetch', vi.fn((url) => {
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultation))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated(
+      'ODONTOLOGO',
+      false,
+      '/pacientes/1/consultas/12',
+      [...rolePermissions.ODONTOLOGO, 'appointments.create'],
+    )
+
+    expect(await screen.findByText(consultation.summary)).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Seguimiento de la atención' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [403, 'No tienes permiso para completar esta consulta.'],
+    [409, 'La consulta no contiene todos los datos obligatorios.'],
+  ])('[HU-46] preserves editing and shows completion error %s', async (status, detail) => {
+    vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/1/consultations/12/complete/') && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ detail }, status))
+      }
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(inProgressConsultationFixture))
+      if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+    renderAuthenticated('ODONTOLOGO', false, '/pacientes/1/consultas/12')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Completar consulta' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar cierre' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(detail)
+    expect(screen.getByLabelText('Resumen')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Completar consulta' })).toBeInTheDocument()
   })
 
   it('keeps consultation values read-only without edit capability', async () => {
@@ -498,8 +1143,8 @@ describe('authenticated routes', () => {
       if (url.endsWith('/api/patients/1/consultations/12/') && options.method === 'PATCH') {
         return Promise.resolve(jsonResponse({ detail: 'No fue posible guardar la consulta.' }, 400))
       }
-      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(consultationFixture))
-      if (url.endsWith('/api/patients/1/consultations/')) return Promise.resolve(jsonResponse([consultationFixture]))
+      if (url.endsWith('/api/patients/1/consultations/12/')) return Promise.resolve(jsonResponse(inProgressConsultationFixture))
+      if (url.endsWith('/api/patients/1/consultations/')) return Promise.resolve(jsonResponse([inProgressConsultationFixture]))
       if (url.endsWith('/api/patients/1/')) return Promise.resolve(jsonResponse(patientFixture))
       throw new Error(`Unexpected request: ${url}`)
     }))
@@ -604,9 +1249,12 @@ describe('authenticated routes', () => {
 
   it('[HU-13] shows the duplicate identification error without losing the new patient draft', async () => {
     vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
+      if (url.endsWith('/api/patients/duplicate-check/') && options.method === 'POST') {
+        return Promise.resolve(jsonResponse({ has_matches: false, matches: [] }))
+      }
       if (url.endsWith('/api/patients/') && options.method === 'POST') {
         return Promise.resolve(jsonResponse({
-          national_id: ['Ya existe un paciente con esta cédula.'],
+          identification_number: ['Ya existe un paciente con este tipo y número de identificación.'],
         }, 400))
       }
       throw new Error(`Unexpected request: ${url}`)
@@ -616,13 +1264,14 @@ describe('authenticated routes', () => {
     fireEvent.change(screen.getByLabelText('Nombres'), { target: { value: 'María Fernanda' } })
     fireEvent.change(screen.getByLabelText('Primer apellido'), { target: { value: 'García' } })
     fireEvent.change(screen.getByLabelText('Lugar de nacimiento'), { target: { value: 'Managua' } })
-    fireEvent.change(screen.getByLabelText('Cédula'), { target: { value: '0011604980001a' } })
+    fireEvent.change(screen.getByLabelText('Tipo de identificación'), { target: { value: 'CEDULA' } })
+    fireEvent.change(screen.getByLabelText('Número de identificación'), { target: { value: '0011604980001a' } })
     fireEvent.change(screen.getByLabelText('Género'), { target: { value: 'FEMENINO' } })
     fireEvent.change(screen.getByLabelText('Fecha de nacimiento'), { target: { value: '1998-04-16' } })
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Ya existe un paciente con esta cédula.')
-    expect(screen.getByLabelText('Cédula')).toHaveValue('0011604980001a')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Ya existe un paciente con este tipo y número de identificación.')
+    expect(screen.getByLabelText('Número de identificación')).toHaveValue('0011604980001a')
     expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeInTheDocument()
     expect(router.state.location.pathname).toBe('/pacientes/nuevo')
   })

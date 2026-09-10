@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useCallback, useEffect, useRef } from 'react'
 import {
   FINDING_LABELS,
   PERMANENT_ARCHES,
@@ -86,10 +86,45 @@ function Arch({ label, codes, teeth, layer, canModify, selectedTooth, highlighte
   </section>
 }
 
-function OdontogramChart({ dentition, teeth, layer = 'current', canModify = false, selectedTooth = '', highlightedTeeth = [], onSelectTooth, onSurfaceClick, scrollContainerRef, onScroll }) {
+function verticalWheelPixels(event, container) {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    const computedLineHeight = Number.parseFloat(getComputedStyle(container).lineHeight)
+    return event.deltaY * (Number.isFinite(computedLineHeight) ? computedLineHeight : 16)
+  }
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * container.clientWidth
+  return event.deltaY
+}
+
+function handleHorizontalWheel(event) {
+  if (event.ctrlKey || event.shiftKey || event.deltaX !== 0 || event.deltaY === 0) return
+
+  const container = event.currentTarget
+  const maximum = Math.max(0, container.scrollWidth - container.clientWidth)
+  const next = Math.min(maximum, Math.max(0, container.scrollLeft + verticalWheelPixels(event, container)))
+  if (next === container.scrollLeft) return
+
+  event.preventDefault()
+  container.scrollLeft = next
+}
+
+function OdontogramChart({ dentition, teeth, layer = 'current', canModify = false, selectedTooth = '', highlightedTeeth = [], onSelectTooth, onSurfaceClick, scrollContainerRef, onScroll, ariaLabel = 'Odontograma dental' }) {
+  const containerRef = useRef(null)
+  const assignContainerRef = useCallback((node) => {
+    containerRef.current = node
+    if (typeof scrollContainerRef === 'function') scrollContainerRef(node)
+    else if (scrollContainerRef) scrollContainerRef.current = node
+  }, [scrollContainerRef])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return undefined
+    container.addEventListener('wheel', handleHorizontalWheel, { passive: false })
+    return () => container.removeEventListener('wheel', handleHorizontalWheel)
+  }, [])
+
   const showPermanent = dentition !== 'PRIMARY'
   const showPrimary = dentition !== 'PERMANENT'
-  return <div ref={scrollContainerRef} onScroll={onScroll} className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-6">
+  return <div ref={assignContainerRef} onScroll={onScroll} role="region" aria-label={ariaLabel} tabIndex={0} className="overflow-x-auto overflow-y-hidden rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-6">
     <div className="mx-auto min-w-[940px] space-y-7">
       {showPermanent ? <Arch label="Maxilar superior · permanente" codes={PERMANENT_ARCHES.upper} teeth={teeth} layer={layer} canModify={canModify} selectedTooth={selectedTooth} highlightedTeeth={highlightedTeeth} onSelectTooth={onSelectTooth} onSurfaceClick={onSurfaceClick} /> : null}
       {showPrimary ? <Arch label="Maxilar superior · temporal" codes={PRIMARY_ARCHES.upper} teeth={teeth} layer={layer} canModify={canModify} selectedTooth={selectedTooth} highlightedTeeth={highlightedTeeth} onSelectTooth={onSelectTooth} onSurfaceClick={onSurfaceClick} /> : null}

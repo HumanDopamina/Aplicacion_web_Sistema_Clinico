@@ -6,6 +6,11 @@ const roleLabels = {
   ODONTOLOGO: 'Odontólogo',
 }
 
+const viewAllDependencies = {
+  'appointments.view_all': 'appointments.view',
+  'consultations.view_all': 'consultations.view',
+}
+
 export default function RolePermissionsPanel({ accessToken }) {
   const [catalog, setCatalog] = useState([])
   const [presets, setPresets] = useState([])
@@ -46,11 +51,14 @@ export default function RolePermissionsPanel({ accessToken }) {
       let next = current.includes(code)
         ? current.filter((permission) => permission !== code)
         : [...current, code]
-      if (code === 'appointments.view' && current.includes(code)) {
-        next = next.filter((permission) => permission !== 'appointments.view_all')
+      const dependentViewAll = Object.entries(viewAllDependencies)
+        .find(([, basePermission]) => basePermission === code)?.[0]
+      if (dependentViewAll && current.includes(code)) {
+        next = next.filter((permission) => permission !== dependentViewAll)
       }
-      if (code === 'appointments.view_all' && !current.includes(code)) {
-        next = [...next, 'appointments.view']
+      const requiredView = viewAllDependencies[code]
+      if (requiredView && !current.includes(code)) {
+        next = [...next, requiredView]
       }
       return catalog.filter((permission) => next.includes(permission.code)).map(({ code: value }) => value)
     })

@@ -1,0 +1,41 @@
+# Import as a Render Blueprint; all resources must be used only for synthetic data.
+services:
+  - type: web
+    name: dentalclinic-demo
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./src/backend/Dockerfile
+    dockerContext: ./src/backend
+    healthCheckPath: /health/live/
+    autoDeployTrigger: off
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.demo
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      - key: ALLOWED_HOSTS
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: dentalclinic-demo-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: dentalclinic-demo-cache
+          property: connectionString
+  - type: keyvalue
+    name: dentalclinic-demo-cache
+    plan: free
+    region: oregon
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+databases:
+  - name: dentalclinic-demo-db
+    databaseName: dentalclinic_demo
+    plan: free
+    region: oregon
+    postgresMajorVersion: "18"

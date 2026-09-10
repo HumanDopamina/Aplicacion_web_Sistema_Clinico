@@ -30,7 +30,9 @@ class OdontogramApiTests(APITestCase):
             first_name="María",
             last_name="García",
             birth_place="Managua",
-            national_id="001-160498-0001A",
+            identification_type=Patient.IdentificationType.CEDULA,
+            identification_number="001-160498-0001A",
+            phone="+505 8000 0000",
             gender="FEMENINO",
             date_of_birth="1998-04-16",
             registered_by=self.admin,
@@ -39,7 +41,9 @@ class OdontogramApiTests(APITestCase):
             first_name="Juan",
             last_name="Pérez",
             birth_place="León",
-            national_id="001-010190-0002B",
+            identification_type=Patient.IdentificationType.CEDULA,
+            identification_number="001-010190-0002B",
+            phone="+505 8000 0000",
             gender="MASCULINO",
             date_of_birth="1990-01-01",
             registered_by=self.admin,
@@ -136,7 +140,12 @@ class OdontogramApiTests(APITestCase):
                     first_name=f"Paciente {index}",
                     last_name="Dentición",
                     birth_place="Managua",
-                    national_id=f"001-090809-000{index}D",
+                    identification_type=Patient.IdentificationType.CEDULA,
+                    identification_number=f"001-090809-000{index}D",
+                    phone="+505 8000 0000",
+                    guardian_name="Responsable de prueba",
+                    guardian_relationship="Madre, padre o tutor",
+                    guardian_phone="+505 8000 0001",
                     gender="OTRO",
                     date_of_birth=birth_date,
                     registered_by=self.admin,
@@ -305,8 +314,11 @@ class OdontogramApiTests(APITestCase):
         )
 
         self.assertEqual(history.status_code, 200)
-        self.assertEqual([item["version_number"] for item in history.data], [2, 1])
-        self.assertNotIn("teeth", history.data[0])
+        self.assertEqual(
+            [item["version_number"] for item in history.data["results"]],
+            [2, 1],
+        )
+        self.assertNotIn("teeth", history.data["results"][0])
         self.assertEqual(detail.status_code, 200)
         self.assertIn("teeth", detail.data)
         self.assertEqual(wrong_patient.status_code, 404)

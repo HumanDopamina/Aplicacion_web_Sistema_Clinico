@@ -1,8 +1,9 @@
 from django.urls import path
-from rest_framework_simplejwt.views import TokenRefreshView
 
 from .views import (
     ChangePasswordView,
+    CookieTokenRefreshView,
+    CsrfCookieView,
     CurrentUserView,
     LoginView,
     LogoutView,
@@ -11,14 +12,16 @@ from .views import (
     RolePermissionPresetCollectionView,
     RolePermissionPresetDetailView,
     UserCollectionView,
+    UserAvatarView,
     UserDetailView,
 )
 
 app_name = "users"
 
 urlpatterns = [
+    path("csrf/", CsrfCookieView.as_view(), name="csrf"),
     path("login/", LoginView.as_view(), name="login"),
-    path("token/refresh/", TokenRefreshView.as_view(), name="token-refresh"),
+    path("token/refresh/", CookieTokenRefreshView.as_view(), name="token-refresh"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("password-change/", ChangePasswordView.as_view(), name="password-change"),
     path("password-reset/", PasswordResetRequestView.as_view(), name="password-reset"),
@@ -28,8 +31,10 @@ urlpatterns = [
         name="password-reset-confirm",
     ),
     path("me/", CurrentUserView.as_view(), name="current-user"),
+    path("me/avatar/", UserAvatarView.as_view(), name="current-user-avatar"),
     path("users/", UserCollectionView.as_view(), name="user-list"),
     path("users/<int:pk>/", UserDetailView.as_view(), name="user-detail"),
+    path("users/<int:pk>/avatar/", UserAvatarView.as_view(), name="user-avatar"),
     path(
         "role-permissions/",
         RolePermissionPresetCollectionView.as_view(),

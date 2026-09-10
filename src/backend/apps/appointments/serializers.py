@@ -8,17 +8,19 @@ from apps.users.models import User
 from apps.clinics.availability import schedule_error
 from apps.clinics.models import ClinicService
 
-from .models import Appointment
+from .models import (
+    Appointment,
+    AppointmentRescheduleEvent,
+    BLOCKING_APPOINTMENT_STATUSES,
+)
 
 
-ACTIVE_STATUSES = (Appointment.Status.SCHEDULED, Appointment.Status.CONFIRMED)
 STATUS_TRANSITIONS = {
     Appointment.Status.SCHEDULED: {
         Appointment.Status.CONFIRMED,
         Appointment.Status.CANCELLED,
     },
     Appointment.Status.CONFIRMED: {
-        Appointment.Status.COMPLETED,
         Appointment.Status.CANCELLED,
         Appointment.Status.NO_SHOW,
     },
@@ -36,7 +38,10 @@ def appointment_end_minutes(start_time, duration_minutes):
 def has_overlap(*, date, start_time, duration_minutes, dentist=None, patient=None, exclude_id=None):
     new_start = start_time.hour * 60 + start_time.minute
     new_end = appointment_end_minutes(start_time, duration_minutes)
-    queryset = Appointment.objects.filter(date=date).exclude(status=Appointment.Status.CANCELLED)
+    queryset = Appointment.objects.filter(
+        date=date,
+        status__in=BLOCKING_APPOINTMENT_STATUSES,
+    )
     if dentist is not None:
         queryset = queryset.filter(dentist=dentist)
     if patient is not None:
@@ -52,6 +57,12 @@ def has_overlap(*, date, start_time, duration_minutes, dentist=None, patient=Non
 
 
 class AppointmentSerializer(serializers.ModelSerializer):
+    reschedule_reason = serializers.CharField(
+        write_only=True,
+        required=False,
+        allow_blank=True,
+        max_length=500,
+    )
     patient = serializers.PrimaryKeyRelatedField(queryset=Patient.objects.all())
     dentist = serializers.PrimaryKeyRelatedField(queryset=get_user_model().objects.all())
     service = serializers.PrimaryKeyRelatedField(
@@ -60,6 +71,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(source="service.name", read_only=True)
     patient_name = serializers.CharField(source="patient.full_name", read_only=True)
     patient_code = serializers.CharField(source="patient.code", read_only=True)
+    patient_is_active = serializers.BooleanField(source="patient.is_active", read_only=True)
     dentist_name = serializers.SerializerMethodField()
     end_time = serializers.TimeField(read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
@@ -67,15 +79,18 @@ class AppointmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Appointment
         fields = (
-            "id", "patient", "patient_name", "patient_code", "dentist", "dentist_name",
+            "id", "patient", "patient_name", "patient_code", "patient_is_active",
+            "dentist", "dentist_name",
             "service", "service_name",
             "date", "start_time", "end_time", "duration_minutes", "reason", "notes",
-            "status", "status_display", "cancellation_reason", "created_by",
-            "created_at", "updated_at",
+            "status", "status_display", "cancellation_reason", "consultation",
+            "attendance_started_at", "created_by",
+            "created_at", "updated_at", "reschedule_reason",
         )
         read_only_fields = (
             "id", "patient_name", "patient_code", "dentist_name", "end_time",
             "status_display", "service_name", "created_by", "created_at", "updated_at",
+            "consultation", "attendance_started_at",
         )
 
     def get_dentist_name(self, appointment):
@@ -97,6 +112,9 @@ class AppointmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Indica el motivo de la cita.")
         return reason
 
+    def validate_reschedule_reason(self, reason):
+        return reason.strip()
+
     def validate_service(self, service):
         if service is None:
             return service
@@ -111,6 +129,30 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         instance = self.instance
+        if not instance and "reschedule_reason" in attrs:
+            raise serializers.ValidationError({
+                "reschedule_reason": "El motivo de reprogramación sólo aplica al editar una cita."
+            })
+        requested_status = attrs.get("status")
+        if requested_status in (
+            Appointment.Status.CHECKED_IN,
+            Appointment.Status.IN_ATTENDANCE,
+        ):
+            raise serializers.ValidationError(
+                "Utiliza la acción operativa correspondiente para cambiar este estado."
+            )
+        if (
+            instance
+            and requested_status == Appointment.Status.COMPLETED
+            and instance.status == Appointment.Status.CONFIRMED
+        ):
+            raise serializers.ValidationError(
+                "La cita sólo puede completarse mediante la acción clínica correspondiente."
+            )
+        if instance and instance.consultation_id and requested_status not in (None, instance.status):
+            raise serializers.ValidationError(
+                "La cita ya tiene una consulta iniciada y su estado requiere una acción clínica."
+            )
         if instance and instance.status not in STATUS_TRANSITIONS and attrs:
             raise serializers.ValidationError("La cita está en un estado final y no puede modificarse.")
 
@@ -147,6 +189,30 @@ class AppointmentSerializer(serializers.ModelSerializer):
         if next_status != Appointment.Status.CANCELLED:
             attrs["cancellation_reason"] = ""
         return attrs
+
+
+class AppointmentRescheduleEventSerializer(serializers.ModelSerializer):
+    changed_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AppointmentRescheduleEvent
+        fields = (
+            "id",
+            "previous_date",
+            "previous_start_time",
+            "previous_duration_minutes",
+            "new_date",
+            "new_start_time",
+            "new_duration_minutes",
+            "reason",
+            "changed_by",
+            "changed_by_name",
+            "created_at",
+        )
+        read_only_fields = fields
+
+    def get_changed_by_name(self, event):
+        return display_name(event.changed_by)
 
 
 class DentistAvailabilityQuerySerializer(serializers.Serializer):

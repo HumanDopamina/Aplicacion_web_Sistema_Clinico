@@ -6,6 +6,11 @@ PERMISSION_CATALOG = (
     {"code": "patients.create", "label": "Registrar pacientes", "group": "Pacientes"},
     {"code": "patients.edit", "label": "Editar pacientes", "group": "Pacientes"},
     {"code": "consultations.view", "label": "Ver consultas", "group": "Consultas"},
+    {
+        "code": "consultations.view_all",
+        "label": "Ver consultas de todo el equipo",
+        "group": "Consultas",
+    },
     {"code": "consultations.create", "label": "Registrar consultas", "group": "Consultas"},
     {"code": "consultations.edit", "label": "Editar consultas", "group": "Consultas"},
     {"code": "appointments.view", "label": "Ver citas", "group": "Citas"},
@@ -22,6 +27,10 @@ PERMISSION_CATALOG = (
 )
 
 PERMISSION_CODES = tuple(item["code"] for item in PERMISSION_CATALOG)
+ADMINISTRATIVE_PERMISSION_CODES = (
+    "clinic.manage",
+    "users.manage",
+)
 EDITABLE_ROLES = ("RECEPCIONISTA", "ODONTOLOGO")
 DEFAULT_ROLE_PERMISSIONS = {
     "RECEPCIONISTA": [
@@ -55,7 +64,7 @@ def order_permissions(permissions):
 
 def get_effective_permissions(user):
     if user.role == "ADMINISTRADOR":
-        return list(PERMISSION_CODES)
+        return list(PERMISSION_CODES + ADMINISTRATIVE_PERMISSION_CODES)
 
     from .models import RolePermissionPreset
 
@@ -76,6 +85,8 @@ class HasCapability(BasePermission):
     """Authorize each HTTP method with the capability declared by the view."""
 
     def has_permission(self, request, view):
+        if request.method not in view.allowed_methods:
+            return True
         permission_code = getattr(view, "required_permissions", {}).get(request.method)
         return bool(
             request.user

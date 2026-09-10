@@ -3,7 +3,7 @@ from copy import deepcopy
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from .models import OdontogramVersion, Patient
+from .models import Consultation, OdontogramVersion, Patient
 
 
 PERMANENT_TEETH = {
@@ -114,7 +114,10 @@ def normalize_teeth_snapshot(teeth, dentition):
 def create_odontogram_revision(*, consultation, author, base_version_id, dentition, teeth, note):
     normalized_teeth = normalize_teeth_snapshot(teeth, dentition)
     with transaction.atomic():
+        consultation = Consultation.objects.select_for_update().get(pk=consultation.pk)
         patient = Patient.objects.select_for_update().get(pk=consultation.patient_id)
+        if consultation.status != Consultation.Status.IN_PROGRESS or not patient.is_active:
+            raise ValidationError({"detail": "La consulta cerrada o el paciente inactivo es de solo lectura."})
         current = (
             OdontogramVersion.objects.filter(consultation=consultation)
             .order_by("-version_number")

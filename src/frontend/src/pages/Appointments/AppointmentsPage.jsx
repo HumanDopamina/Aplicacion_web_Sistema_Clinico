@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/authContextValue'
 import {
+  checkInAppointment,
   createAppointment,
-  listAppointments,
+  listAllAppointments,
+  listAppointmentReschedules,
+  startAppointmentAttendance,
   updateAppointment,
 } from '../../services/appointmentService'
-import { listPatients } from '../../services/patientService'
 import { listClinicServices } from '../../services/clinicService'
 import { useClinic } from '../../context/clinicContextValue'
 import AppointmentDetailsPanel from './AppointmentDetailsPanel'
@@ -25,21 +28,33 @@ import {
 const can = (user, permission) => user.role === 'ADMINISTRADOR' || user.permissions?.includes(permission)
 
 export default function AppointmentsPage() {
+  const navigateTo = useNavigate()
+  const location = useLocation()
   const { user, accessToken } = useAuth()
   const { profile } = useClinic()
   const [selectedDate, setSelectedDate] = useState(() => todayValue(profile.timezone))
   const [calendarView, setCalendarView] = useState('day')
   const [appointments, setAppointments] = useState([])
-  const [patients, setPatients] = useState([])
   const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
   const [formAppointment, setFormAppointment] = useState(undefined)
+  const [formPrefill, setFormPrefill] = useState(null)
   const [formOpen, setFormOpen] = useState(false)
   const [selectedAppointment, setSelectedAppointment] = useState(null)
+  const [rescheduleHistory, setRescheduleHistory] = useState([])
+  const [rescheduleHistoryLoading, setRescheduleHistoryLoading] = useState(false)
+  const [rescheduleHistoryError, setRescheduleHistoryError] = useState('')
+  const attendanceStartRef = useRef(null)
+  const checkInRef = useRef(null)
   const canCreate = can(user, 'appointments.create')
   const canEdit = can(user, 'appointments.edit')
+  const canViewPatient = can(user, 'patients.view')
+  const canEditPatient = can(user, 'patients.edit')
+  const canStartAttendance = can(user, 'consultations.create')
+    && ['ADMINISTRADOR', 'ODONTOLOGO'].includes(user.role)
+  const canContinueAttendance = can(user, 'consultations.view')
   const agendaFilters = useMemo(
     () => calendarRange(calendarView, selectedDate),
     [calendarView, selectedDate],
@@ -50,14 +65,12 @@ export default function AppointmentsPage() {
     setLoading(true)
     setError('')
     Promise.all([
-      listAppointments(accessToken, agendaFilters),
-      listPatients(accessToken),
+      listAllAppointments(accessToken, agendaFilters),
       listClinicServices(accessToken),
     ])
-      .then(([appointmentData, patientData, serviceData]) => {
+      .then(([appointmentData, serviceData]) => {
         if (!active) return
         setAppointments(appointmentData)
-        setPatients(patientData.filter((patient) => patient.is_active))
         setServices(serviceData)
       })
       .catch((requestError) => { if (active) setError(requestError.message) })
@@ -68,12 +81,71 @@ export default function AppointmentsPage() {
   useEffect(() => loadAgenda(), [loadAgenda])
 
   useEffect(() => {
+    if (!selectedAppointment?.id) {
+      setRescheduleHistory([])
+      setRescheduleHistoryError('')
+      setRescheduleHistoryLoading(false)
+      return undefined
+    }
+    let active = true
+    setRescheduleHistoryLoading(true)
+    setRescheduleHistoryError('')
+    listAppointmentReschedules(accessToken, selectedAppointment.id)
+      .then((items) => { if (active) setRescheduleHistory(items) })
+      .catch((requestError) => {
+        if (active) {
+          setRescheduleHistory([])
+          setRescheduleHistoryError(requestError.message)
+        }
+      })
+      .finally(() => { if (active) setRescheduleHistoryLoading(false) })
+    return () => { active = false }
+  }, [accessToken, selectedAppointment?.id])
+
+  useEffect(() => {
     if (!toast) return undefined
     const timer = setTimeout(() => setToast(''), 3500)
     return () => clearTimeout(timer)
   }, [toast])
 
+  useEffect(() => {
+    const prefill = location.state?.appointmentPrefill
+    if (loading || !prefill) return
+
+    if (canCreate) {
+      const treatmentService = prefill.treatment?.service
+      const selectedService = treatmentService
+        ? services.find(({ id, is_active: isActive }) => (
+          id === treatmentService.id && isActive
+        ))
+        : null
+      setFormPrefill({
+        initialValues: {
+          patient: prefill.patient?.id || '',
+          dentist: prefill.dentist?.id || '',
+          service: selectedService?.id || '',
+          duration_minutes: selectedService?.duration_minutes || 60,
+          reason: prefill.treatment?.description || 'Seguimiento clínico',
+          date: '',
+          start_time: '',
+        },
+        initialPatient: prefill.patient || null,
+        initialDentist: prefill.dentist || null,
+        followUpContext: {
+          treatmentDescription: prefill.treatment?.description || '',
+          serviceName: treatmentService?.name || '',
+          serviceAvailable: treatmentService ? Boolean(selectedService) : null,
+        },
+      })
+      setFormAppointment(undefined)
+      setSelectedAppointment(null)
+      setFormOpen(true)
+    }
+    navigateTo(location.pathname, { replace: true, state: null })
+  }, [canCreate, loading, location.pathname, location.state, navigateTo, services])
+
   const openCreate = () => {
+    setFormPrefill(null)
     setFormAppointment(undefined)
     setSelectedAppointment(null)
     setFormOpen(true)
@@ -92,6 +164,7 @@ export default function AppointmentsPage() {
     })
     setFormOpen(false)
     setFormAppointment(undefined)
+    setFormPrefill(null)
     setToast(formAppointment ? 'Cita actualizada.' : 'Cita programada.')
   }
 
@@ -106,9 +179,49 @@ export default function AppointmentsPage() {
   }
 
   const editSelected = () => {
+    setFormPrefill(null)
     setFormAppointment(selectedAppointment)
     setSelectedAppointment(null)
     setFormOpen(true)
+  }
+
+  const startSelectedAttendance = async () => {
+    if (attendanceStartRef.current === selectedAppointment.id) return
+    attendanceStartRef.current = selectedAppointment.id
+    try {
+      const result = await startAppointmentAttendance(accessToken, selectedAppointment.id)
+      setAppointments((current) => current.map((item) => (
+        item.id === result.appointment.id ? result.appointment : item
+      )))
+      navigateTo(`/pacientes/${result.appointment.patient}/consultas/${result.consultation.id}`)
+    } finally {
+      attendanceStartRef.current = null
+    }
+  }
+
+  const checkInSelected = async () => {
+    if (checkInRef.current === selectedAppointment.id) return
+    checkInRef.current = selectedAppointment.id
+    try {
+      const result = await checkInAppointment(accessToken, selectedAppointment.id)
+      setAppointments((current) => current.map((item) => (
+        item.id === result.appointment.id ? result.appointment : item
+      )))
+      setSelectedAppointment(result.appointment)
+      setToast(result.changed ? 'Llegada registrada.' : 'La llegada ya estaba registrada.')
+    } finally {
+      checkInRef.current = null
+    }
+  }
+
+  const openSelectedPatient = () => {
+    navigateTo(`/pacientes/${selectedAppointment.patient}`)
+  }
+
+  const continueSelectedAttendance = () => {
+    navigateTo(
+      `/pacientes/${selectedAppointment.patient}/consultas/${selectedAppointment.consultation}`,
+    )
   }
 
   const navigate = (direction) => {
@@ -163,7 +276,39 @@ export default function AppointmentsPage() {
     </section>
 
     {toast ? <div role="status" className="fixed bottom-5 right-5 z-[60] rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-xl">{toast}</div> : null}
-    {formOpen ? <AppointmentFormPanel accessToken={accessToken} appointment={formAppointment} patients={patients} services={services} selectedDate={selectedDate} onClose={() => setFormOpen(false)} onSave={saveAppointment} /> : null}
-    {selectedAppointment ? <AppointmentDetailsPanel appointment={selectedAppointment} canEdit={canEdit} onClose={() => setSelectedAppointment(null)} onEdit={editSelected} onStatus={changeStatus} /> : null}
+    {formOpen ? <AppointmentFormPanel
+      accessToken={accessToken}
+      appointment={formAppointment}
+      canCreatePatient={can(user, 'patients.create')}
+      services={services}
+      selectedDate={selectedDate}
+      initialValues={formPrefill?.initialValues}
+      initialPatient={formPrefill?.initialPatient}
+      initialDentist={formPrefill?.initialDentist}
+      followUpContext={formPrefill?.followUpContext}
+      onClose={() => { setFormOpen(false); setFormPrefill(null) }}
+      onSave={saveAppointment}
+    /> : null}
+    {selectedAppointment ? <AppointmentDetailsPanel
+      appointment={selectedAppointment}
+      canEdit={canEdit}
+      canCheckIn={canEdit}
+      canViewPatient={canViewPatient}
+      canCompletePatientProfile={canViewPatient && canEditPatient}
+      canStartAttendance={canStartAttendance}
+      canContinueAttendance={canContinueAttendance}
+      timeZone={profile.timezone}
+      onClose={() => setSelectedAppointment(null)}
+      onEdit={editSelected}
+      onStatus={changeStatus}
+      onOpenPatient={openSelectedPatient}
+      onCompletePatientProfile={openSelectedPatient}
+      onStartAttendance={startSelectedAttendance}
+      onCheckIn={checkInSelected}
+      onContinueAttendance={continueSelectedAttendance}
+      rescheduleHistory={rescheduleHistory}
+      rescheduleHistoryLoading={rescheduleHistoryLoading}
+      rescheduleHistoryError={rescheduleHistoryError}
+    /> : null}
   </div>
 }

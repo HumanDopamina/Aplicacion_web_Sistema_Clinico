@@ -1,20 +1,57 @@
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from rest_framework import generics
+from rest_framework import status
 from rest_framework.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.users.models import User
 from apps.users.permissions import HasCapability, user_has_permission
+from apps.common.pagination import StandardPageNumberPagination
+from apps.patients.serializers import ConsultationSerializer
 
-from .models import Appointment
+from .models import Appointment, AppointmentRescheduleEvent
+from .services import (
+    AppointmentAttendanceError,
+    AppointmentCheckInError,
+    check_in_appointment,
+    start_attendance,
+    update_appointment_with_history,
+)
 from .serializers import (
     DentistAvailabilityQuerySerializer,
     DentistOptionSerializer,
     AppointmentSerializer,
+    AppointmentRescheduleEventSerializer,
     has_overlap,
 )
+
+
+APPOINTMENT_CONFLICTS = {
+    "appointment_dentist_schedule_excl": {
+        "code": "appointment_overlap",
+        "conflict": "dentist",
+        "detail": "El odontólogo ya tiene una cita en ese horario.",
+    },
+    "appointment_patient_schedule_excl": {
+        "code": "appointment_overlap",
+        "conflict": "patient",
+        "detail": "El paciente ya tiene una cita en ese horario.",
+    },
+}
+
+
+def appointment_integrity_conflict(error):
+    cause = error.__cause__
+    diagnostic = getattr(cause, "diag", None)
+    constraint_name = getattr(diagnostic, "constraint_name", None)
+    payload = APPOINTMENT_CONFLICTS.get(constraint_name)
+    if payload is None:
+        raise error
+    return Response(payload, status=status.HTTP_409_CONFLICT)
 
 
 def can_view_all_appointments(user):
@@ -39,6 +76,7 @@ def enforce_dentist_assignment_scope(request):
 
 class AppointmentListCreateView(generics.ListCreateAPIView):
     serializer_class = AppointmentSerializer
+    pagination_class = StandardPageNumberPagination
     permission_classes = (IsAuthenticated, HasCapability)
     required_permissions = {
         "GET": "appointments.view",
@@ -48,10 +86,16 @@ class AppointmentListCreateView(generics.ListCreateAPIView):
     def get_queryset(self):
         queryset = Appointment.objects.select_related("patient", "dentist", "created_by", "service")
         queryset = scope_appointments_for_user(queryset, self.request.user)
-        appointment_date = self.request.query_params.get("date")
-        date_from = self.request.query_params.get("date_from")
-        date_to = self.request.query_params.get("date_to")
-        dentist = self.request.query_params.get("dentist")
+        from apps.common.query_parameters import validated_parameter
+        from rest_framework import serializers
+
+        params = self.request.query_params
+        appointment_date = validated_parameter(params, "date", serializers.DateField())
+        date_from = validated_parameter(params, "date_from", serializers.DateField())
+        date_to = validated_parameter(params, "date_to", serializers.DateField())
+        dentist = validated_parameter(params, "dentist", serializers.IntegerField(min_value=1))
+        if date_from and date_to and date_from > date_to:
+            raise serializers.ValidationError({"date_to": "Debe ser igual o posterior a date_from."})
         appointment_status = self.request.query_params.get("status")
         if appointment_date:
             queryset = queryset.filter(date=appointment_date)
@@ -68,7 +112,11 @@ class AppointmentListCreateView(generics.ListCreateAPIView):
 
     def create(self, request, *args, **kwargs):
         enforce_dentist_assignment_scope(request)
-        return super().create(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                return super().create(request, *args, **kwargs)
+        except IntegrityError as error:
+            return appointment_integrity_conflict(error)
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user, status=Appointment.Status.SCHEDULED)
@@ -89,9 +137,127 @@ class AppointmentDetailView(generics.RetrieveUpdateAPIView):
         return scope_appointments_for_user(super().get_queryset(), self.request.user)
 
     def update(self, request, *args, **kwargs):
-        self.get_object()
-        enforce_dentist_assignment_scope(request)
-        return super().update(request, *args, **kwargs)
+        try:
+            with transaction.atomic():
+                instance = get_object_or_404(
+                    self.get_queryset().select_for_update(of=("self",)),
+                    pk=kwargs["pk"],
+                )
+                self.check_object_permissions(request, instance)
+                enforce_dentist_assignment_scope(request)
+                serializer = self.get_serializer(
+                    instance,
+                    data=request.data,
+                    partial=kwargs.pop("partial", False),
+                )
+                serializer.is_valid(raise_exception=True)
+                changes = dict(serializer.validated_data)
+                reschedule_reason = changes.pop("reschedule_reason", "")
+                result = update_appointment_with_history(
+                    appointment=instance,
+                    changes=changes,
+                    actor=request.user,
+                    reason=reschedule_reason,
+                )
+                if result.reschedule_event is not None:
+                    request._request.audit_action = "APPOINTMENT_RESCHEDULE"
+                    request.audit_metadata.update({"appointment_id": instance.pk})
+                return Response(
+                    self.get_serializer(result.appointment).data,
+                )
+        except IntegrityError as error:
+            return appointment_integrity_conflict(error)
+
+
+class AppointmentRescheduleHistoryView(generics.ListAPIView):
+    serializer_class = AppointmentRescheduleEventSerializer
+    pagination_class = StandardPageNumberPagination
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"GET": "appointments.view"}
+
+    def get_appointment(self):
+        if not hasattr(self, "_appointment"):
+            self._appointment = get_object_or_404(
+                scope_appointments_for_user(Appointment.objects.all(), self.request.user),
+                pk=self.kwargs["pk"],
+            )
+            self.request._request.audit_patient_id = self._appointment.patient_id
+        return self._appointment
+
+    def get_queryset(self):
+        appointment = self.get_appointment()
+        return AppointmentRescheduleEvent.objects.select_related("changed_by").filter(
+            appointment=appointment,
+        )
+
+
+class AppointmentStartAttendanceView(APIView):
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"POST": "consultations.create"}
+
+    def post(self, request, pk):
+        appointment = get_object_or_404(
+            scope_appointments_for_user(Appointment.objects.all(), request.user),
+            pk=pk,
+        )
+        request._request.audit_patient_id = appointment.patient_id
+        try:
+            result = start_attendance(appointment_id=appointment.pk, actor=request.user)
+        except AppointmentAttendanceError as error:
+            payload = {"code": error.code, "detail": error.detail}
+            if error.missing_fields:
+                payload["missing_fields"] = list(error.missing_fields)
+            return Response(
+                payload,
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        request.audit_metadata.update({
+            "appointment_id": result.appointment.pk,
+            "consultation_id": result.consultation.pk,
+        })
+        payload = {
+            "appointment": AppointmentSerializer(result.appointment).data,
+            "consultation": ConsultationSerializer(result.consultation).data,
+            "created": result.created,
+        }
+        response_status = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
+        return Response(payload, status=response_status)
+
+
+class AppointmentCheckInView(APIView):
+    permission_classes = (IsAuthenticated, HasCapability)
+    required_permissions = {"POST": "appointments.edit"}
+
+    def post(self, request, pk):
+        appointment = get_object_or_404(
+            scope_appointments_for_user(Appointment.objects.all(), request.user),
+            pk=pk,
+        )
+        request._request.audit_patient_id = appointment.patient_id
+        try:
+            result = check_in_appointment(
+                appointment_id=appointment.pk,
+                actor=request.user,
+            )
+        except AppointmentCheckInError as error:
+            return Response(
+                {"code": error.code, "detail": error.detail},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        request.audit_metadata.update({"appointment_id": result.appointment.pk})
+        return Response(
+            {
+                "appointment": AppointmentSerializer(result.appointment).data,
+                "changed": result.changed,
+            },
+            status=(
+                status.HTTP_201_CREATED
+                if result.changed
+                else status.HTTP_200_OK
+            ),
+        )
 
 
 class DentistAvailabilityView(APIView):

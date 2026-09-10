@@ -1,6 +1,11 @@
 export function patientIdentity(patient) {
   if (!patient) return ''
   const genderLabels = { FEMENINO: 'Femenino', MASCULINO: 'Masculino', OTRO: 'Otro' }
+  const identificationLabels = {
+    CEDULA: 'Cédula',
+    PASAPORTE: 'Pasaporte',
+    OTRO: 'Otra identificación',
+  }
   const parts = []
   if (patient.gender) parts.push(genderLabels[patient.gender] || patient.gender)
   if (patient.date_of_birth) {
@@ -12,7 +17,10 @@ export function patientIdentity(patient) {
     })
     parts.push(formatter.format(new Date(`${patient.date_of_birth}T00:00:00Z`)))
   }
-  if (patient.national_id) parts.push(`Cédula ${patient.national_id}`)
+  if (patient.identification_number) {
+    const label = identificationLabels[patient.identification_type] || 'Identificación'
+    parts.push(`${label} ${patient.identification_number}`)
+  }
   return parts.join(' · ')
 }
 

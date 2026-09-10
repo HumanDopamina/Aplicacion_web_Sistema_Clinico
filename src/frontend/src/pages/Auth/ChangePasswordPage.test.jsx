@@ -14,10 +14,9 @@ const session = {
 }
 
 function renderPage(authenticated = true) {
-  if (authenticated) sessionStorage.setItem('dentalclinic_session', JSON.stringify(session))
   return render(
     <MemoryRouter initialEntries={['/cambiar-contrasena']}>
-      <AuthProvider><App /></AuthProvider>
+      <AuthProvider initialSession={authenticated ? session : null}><App /></AuthProvider>
     </MemoryRouter>,
   )
 }

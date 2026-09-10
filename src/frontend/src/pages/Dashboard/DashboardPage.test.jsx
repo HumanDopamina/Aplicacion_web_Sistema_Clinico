@@ -1,20 +1,41 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { listAppointments } from '../../services/appointmentService'
-import { listPatients } from '../../services/patientService'
+import { listAllAppointments } from '../../services/appointmentService'
+import * as patientService from '../../services/patientService'
 import DashboardPage from './DashboardPage'
 
 vi.mock('../../services/appointmentService')
 vi.mock('../../services/patientService', async (importOriginal) => ({
   ...await importOriginal(),
   listPatients: vi.fn(),
+  listPatientDashboardSummary: vi.fn(),
+  listRecentConsultations: vi.fn(),
 }))
+
+const recentConsultation = {
+  id: 14,
+  patient: 3,
+  patient_name: 'María García',
+  patient_code: 'PAC-00003',
+  professional_name: 'Dra. Elena Rivera',
+  date: '2026-08-10',
+  time: '10:30:00',
+  consultation_type: 'SEGUIMIENTO',
+  consultation_type_display: 'Seguimiento',
+  status: 'COMPLETADA',
+  status_display: 'Completada',
+}
 
 describe('DashboardPage', () => {
   beforeEach(() => {
-    listPatients.mockResolvedValue([])
-    listAppointments.mockResolvedValue([])
+    patientService.listPatients.mockResolvedValue([])
+    patientService.listPatientDashboardSummary.mockResolvedValue({
+      total_patients: 0,
+      recently_attended: [],
+    })
+    listAllAppointments.mockResolvedValue([])
+    patientService.listRecentConsultations.mockResolvedValue([])
   })
   afterEach(() => {
     cleanup()
@@ -31,38 +52,32 @@ describe('DashboardPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Bienvenido, Dr. Arguello' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Nuevo paciente' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Nueva cita' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Agendar citas' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Citas de hoy' })).toBeInTheDocument()
     expect(await screen.findByText('No hay citas programadas para hoy.')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Consultas recientes' })).toBeInTheDocument()
+    expect(await screen.findByText('No hay consultas recientes.')).toBeInTheDocument()
     expect(screen.getByText('Pacientes recientes')).toBeInTheDocument()
-    expect(await screen.findByText('Aún no hay pacientes registrados.')).toBeInTheDocument()
+    expect(screen.getByText('Últimas atenciones')).toBeInTheDocument()
+    expect(await screen.findByText('No hay pacientes atendidos recientemente.')).toBeInTheDocument()
+    expect(screen.getByText('Las consultas completadas aparecerán aquí.')).toBeInTheDocument()
     expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('0')
     expect(screen.queryByText('Leonel Hernández')).not.toBeInTheDocument()
   })
 
-  it('shows the total and recently registered patients returned by the API', async () => {
-    listPatients.mockResolvedValue([{
-      id: 1,
-      code: 'PAC-00001',
-      first_name: 'leonel alberto',
-      last_name: 'hernandez',
-      second_last_name: 'alvarez',
-      full_name: 'leonel alberto hernandez alvarez',
-      birth_place: 'El Viejo, Chinandega',
-      address: 'Iglesia San José',
-      national_id: '3423424242234',
-      phone: '354545454',
-      email: 'leo3@gmail.com',
-      emergency_contact_name: 'Carlos',
-      emergency_relationship: 'Hermano',
-      emergency_phone: '343434',
-      gender: 'MASCULINO',
-      date_of_birth: '2003-07-29',
-      is_active: true,
-      created_at: '2026-08-08T12:00:00Z',
-      updated_at: '2026-08-08T12:00:00Z',
-      registered_by: 2,
-    }])
+  it('shows the total and recently attended patients from the compact summary', async () => {
+    patientService.listPatientDashboardSummary.mockResolvedValue({
+      total_patients: 12,
+      recently_attended: [{
+        id: 1,
+        code: 'PAC-00001',
+        first_name: 'leonel alberto',
+        last_name: 'hernandez',
+        full_name: 'leonel alberto hernandez alvarez',
+        last_attended_date: '2026-08-08',
+        last_attended_time: '12:00:00',
+      }],
+    })
 
     render(
       <MemoryRouter>
@@ -72,9 +87,133 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByText('leonel alberto hernandez alvarez')).toBeInTheDocument()
     expect(screen.getByText('PAC-00001')).toBeInTheDocument()
-    expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('1')
+    expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('12')
     expect(screen.getByRole('link', { name: 'Ver expediente de leonel alberto hernandez alvarez' })).toHaveAttribute('href', '/pacientes/1')
-    expect(screen.queryByText('Aún no hay pacientes registrados.')).not.toBeInTheDocument()
+    expect(screen.queryByText('No hay pacientes atendidos recientemente.')).not.toBeInTheDocument()
+    expect(patientService.listPatients).not.toHaveBeenCalled()
+  })
+
+  it('shows general consultations and recent patients to an administrator', async () => {
+    patientService.listRecentConsultations.mockResolvedValue([recentConsultation])
+    patientService.listPatientDashboardSummary.mockResolvedValue({
+      total_patients: 1,
+      recently_attended: [{
+        id: 8,
+        code: 'PAC-00008',
+        first_name: 'Carlos',
+        last_name: 'Mendoza',
+        full_name: 'Carlos Mendoza',
+        last_attended_date: '2026-08-09',
+        last_attended_time: '09:00:00',
+      }],
+    })
+
+    render(
+      <MemoryRouter>
+        <DashboardPage user={{ first_name: 'Arguello', role: 'ADMINISTRADOR' }} accessToken="access-token" />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Consultas recientes' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
+    expect(screen.getByText('María García')).toBeInTheDocument()
+    expect(screen.getByText(/Seguimiento · Dra. Elena Rivera/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ver consulta de María García' })).toHaveAttribute(
+      'href',
+      '/pacientes/3/consultas/14',
+    )
+    expect(await screen.findByText('Carlos Mendoza')).toBeInTheDocument()
+  })
+
+  it('shows only personal recent consultations in the dentist side column', async () => {
+    patientService.listRecentConsultations.mockResolvedValue([recentConsultation])
+
+    render(
+      <MemoryRouter>
+        <DashboardPage
+          user={{
+            id: 4,
+            first_name: 'Elena',
+            role: 'ODONTOLOGO',
+            permissions: ['patients.view', 'consultations.view', 'appointments.view'],
+          }}
+          accessToken="access-token"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Mis consultas recientes' })).toBeInTheDocument()
+    expect(screen.getByText('María García')).toBeInTheDocument()
+    expect(screen.getByText('Seguimiento')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Pacientes recientes' })).not.toBeInTheDocument()
+  })
+
+  it('hides the consultation summary from reception without team visibility', async () => {
+    render(
+      <MemoryRouter>
+        <DashboardPage
+          user={{
+            first_name: 'Recepción',
+            role: 'RECEPCIONISTA',
+            permissions: ['patients.view', 'consultations.view'],
+          }}
+          accessToken="access-token"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByRole('heading', { name: /consultas recientes/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
+  })
+
+  it('shows both summaries to reception with team consultation visibility', async () => {
+    patientService.listRecentConsultations.mockResolvedValue([recentConsultation])
+
+    render(
+      <MemoryRouter>
+        <DashboardPage
+          user={{
+            first_name: 'Recepción',
+            role: 'RECEPCIONISTA',
+            permissions: ['patients.view', 'consultations.view', 'consultations.view_all'],
+          }}
+          accessToken="access-token"
+        />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Consultas recientes' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
+  })
+
+  it('shows a separate error state when recent consultations cannot be loaded', async () => {
+    patientService.listRecentConsultations.mockRejectedValue(new Error('No se pudieron cargar las consultas.'))
+
+    render(
+      <MemoryRouter>
+        <DashboardPage user={{ first_name: 'Arguello', role: 'ADMINISTRADOR' }} accessToken="access-token" />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('No se pudieron cargar las consultas.')
+    expect(screen.getByRole('heading', { name: 'Pacientes recientes' })).toBeInTheDocument()
+  })
+
+  it('shows an independent error when the patient dashboard summary cannot be loaded', async () => {
+    patientService.listPatientDashboardSummary.mockRejectedValue(
+      new Error('No se pudieron cargar los pacientes recientes.'),
+    )
+
+    render(
+      <MemoryRouter>
+        <DashboardPage user={{ first_name: 'Arguello', role: 'ADMINISTRADOR' }} accessToken="access-token" />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'No se pudieron cargar los pacientes recientes.',
+    )
+    expect(screen.getByLabelText('Total pacientes')).toHaveTextContent('—')
   })
 
   it('opens the full patient record page from the dashboard action', () => {
@@ -99,7 +238,7 @@ describe('DashboardPage', () => {
   it('shows the appointments scheduled for the current local date', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     vi.setSystemTime(new Date('2026-08-09T12:00:00'))
-    listAppointments.mockImplementation((access, filters) => Promise.resolve(
+    listAllAppointments.mockImplementation((access, filters) => Promise.resolve(
       access === 'access-token' && filters.date === '2026-08-09'
         ? [{
             id: 9,
@@ -170,7 +309,7 @@ describe('DashboardPage', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Nueva cita' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Agendar citas' }))
 
     expect(screen.getByRole('heading', { name: 'Agenda de citas' })).toBeInTheDocument()
   })

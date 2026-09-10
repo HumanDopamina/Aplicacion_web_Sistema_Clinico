@@ -10,3 +10,13 @@ class VersionedJWTAuthentication(JWTAuthentication):
         if validated_token.get("token_version") != user.token_version:
             raise AuthenticationFailed("La sesión ya no es válida.", code="session_revoked")
         return user
+
+
+class LogoutJWTAuthentication(VersionedJWTAuthentication):
+    """An expired/revoked access token must not prevent clearing the cookie."""
+
+    def authenticate(self, request):
+        try:
+            return super().authenticate(request)
+        except AuthenticationFailed:
+            return None

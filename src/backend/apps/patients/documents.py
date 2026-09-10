@@ -6,8 +6,12 @@ from uuid import uuid4
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.utils.deconstruct import deconstructible
-from PIL import Image, UnidentifiedImageError
+from django.utils.module_loading import import_string
 from rest_framework import serializers
+
+from apps.common.file_validation import validate_image_content
+from apps.common.pdf_validation import validate_pdf_content
+from apps.common.features import require_uploads_enabled
 
 
 ALLOWED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
@@ -32,6 +36,7 @@ IMAGE_FORMATS = {
     "image/png": {"PNG"},
     "image/webp": {"WEBP"},
 }
+CLINICAL_PHOTO_CATEGORY = "Fotografía clínica"
 
 
 @deconstructible
@@ -45,7 +50,7 @@ class PrivateDocumentStorage(FileSystemStorage):
         return os.path.abspath(self.base_location)
 
 
-private_document_storage = PrivateDocumentStorage()
+private_document_storage = import_string(settings.PRIVATE_MEDIA_STORAGE_BACKEND)()
 
 
 def patient_document_path(instance, filename):
@@ -57,11 +62,16 @@ def normalize_category(value):
     return re.sub(r"\s+", " ", value).strip()
 
 
+def is_clinical_photo_category(value):
+    return normalize_category(value).casefold() == CLINICAL_PHOTO_CATEGORY.casefold()
+
+
 def safe_original_name(value):
     return Path(value).name[:255]
 
 
 def validate_document_file(uploaded_file):
+    require_uploads_enabled()
     extension = Path(uploaded_file.name).suffix.lower()
     content_type = getattr(uploaded_file, "content_type", "").lower()
     if (
@@ -78,18 +88,17 @@ def validate_document_file(uploaded_file):
     uploaded_file.seek(0)
     try:
         if content_type == "application/pdf":
-            head = uploaded_file.read(5)
-            uploaded_file.seek(max(0, uploaded_file.size - 1024))
-            tail = uploaded_file.read()
-            if head != b"%PDF-" or b"%%EOF" not in tail:
-                raise serializers.ValidationError("El contenido del archivo PDF no es válido.")
+            validate_pdf_content(uploaded_file)
         else:
-            with Image.open(uploaded_file) as image:
-                if image.format not in IMAGE_FORMATS[content_type]:
-                    raise serializers.ValidationError("El formato real de la imagen no coincide.")
-                image.verify()
-    except (UnidentifiedImageError, OSError, ValueError) as error:
-        raise serializers.ValidationError("El contenido de la imagen no es válido.") from error
+            uploaded_file = validate_image_content(
+                uploaded_file,
+                IMAGE_FORMATS[content_type],
+                "El contenido de la imagen no es válido.",
+            )
+            if uploaded_file.size > MAX_FILE_SIZE:
+                raise serializers.ValidationError("La imagen procesada supera 10 MB.")
+    except serializers.ValidationError:
+        raise
     finally:
         uploaded_file.seek(0)
     return uploaded_file
