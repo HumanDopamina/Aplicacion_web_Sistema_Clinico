@@ -458,6 +458,16 @@ class PatientDocumentApiTests(APITestCase):
         self.assertEqual(categories.status_code, 200)
         self.assertEqual(categories.data, ["Consentimiento", "Radiografía"])
 
+    def test_category_suggestions_preserve_the_first_used_casing(self):
+        self.client.force_authenticate(self.receptionist)
+        self.upload(png_file("primera.png"), category="radiografía")
+        self.upload(png_file("segunda.png"), category="Radiografía")
+
+        categories = self.client.get("/api/patients/document-categories/")
+
+        self.assertEqual(categories.status_code, 200)
+        self.assertEqual(categories.data, ["radiografía"])
+
     def test_content_is_authenticated_patient_scoped_and_uses_private_headers(self):
         self.client.force_authenticate(self.receptionist)
         created = self.upload(pdf_file())[0]

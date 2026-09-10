@@ -935,7 +935,7 @@ class PatientDocumentCategoryListView(APIView):
     required_permissions = {"GET": "documents.view"}
 
     def get(self, request):
-        categories = PatientDocument.objects.order_by("category").values_list(
+        categories = PatientDocument.objects.order_by("created_at", "pk").values_list(
             "category",
             flat=True,
         )
