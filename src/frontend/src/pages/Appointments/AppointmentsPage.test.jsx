@@ -31,22 +31,24 @@ vi.mock('../../services/patientService', async (importOriginal) => ({
 }))
 vi.mock('../../services/clinicService', () => ({ listClinicServices: vi.fn() }))
 
-const localDate = () => {
-  const now = new Date()
-  const offset = now.getTimezoneOffset() * 60_000
-  return new Date(now.getTime() - offset).toISOString().slice(0, 10)
+const clinicDate = () => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric', month: '2-digit', day: '2-digit', timeZone: 'America/Managua',
+  }).formatToParts(new Date())
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}`
 }
 
 const datePlus = (days) => {
-  const value = new Date(`${localDate()}T12:00:00`)
-  value.setDate(value.getDate() + days)
+  const value = new Date(`${clinicDate()}T12:00:00Z`)
+  value.setUTCDate(value.getUTCDate() + days)
   return value.toISOString().slice(0, 10)
 }
 
 const weekStart = () => {
-  const value = new Date(`${localDate()}T12:00:00`)
-  const weekday = value.getDay()
-  value.setDate(value.getDate() + (weekday === 0 ? -6 : 1 - weekday))
+  const value = new Date(`${clinicDate()}T12:00:00Z`)
+  const weekday = value.getUTCDay()
+  value.setUTCDate(value.getUTCDate() + (weekday === 0 ? -6 : 1 - weekday))
   return value.toISOString().slice(0, 10)
 }
 
@@ -62,7 +64,7 @@ const appointment = (overrides = {}) => ({
   patient_code: 'PAC-00001',
   dentist: 3,
   dentist_name: 'Dra. Elena Vargas',
-  date: localDate(),
+  date: clinicDate(),
   start_time: '09:00:00',
   end_time: '10:00:00',
   duration_minutes: 60,
@@ -72,8 +74,8 @@ const appointment = (overrides = {}) => ({
   status_display: 'Programada',
   cancellation_reason: '',
   created_by: 2,
-  created_at: `${localDate()}T12:00:00Z`,
-  updated_at: `${localDate()}T12:00:00Z`,
+  created_at: `${clinicDate()}T12:00:00Z`,
+  updated_at: `${clinicDate()}T12:00:00Z`,
   ...overrides,
 })
 
@@ -159,7 +161,7 @@ describe('AppointmentsPage', () => {
         status: 'EN_ATENCION',
         status_display: 'En atención',
         consultation: 41,
-        attendance_started_at: `${localDate()}T15:05:00Z`,
+        attendance_started_at: `${clinicDate()}T15:05:00Z`,
       }),
       consultation: { id: 41 },
       created: true,
@@ -227,7 +229,7 @@ describe('AppointmentsPage', () => {
     expect(screen.getByRole('button', { name: /María Ruiz, 11:00 a 11:45/ })).toBeInTheDocument()
     expect(appointmentService.listAllAppointments).toHaveBeenCalledWith(
       'access-token',
-      { date: localDate() },
+      { date: clinicDate() },
     )
   })
 
@@ -582,13 +584,13 @@ describe('AppointmentsPage', () => {
       previous_date: '2026-08-31',
       previous_start_time: '09:00:00',
       previous_duration_minutes: 60,
-      new_date: localDate(),
+      new_date: clinicDate(),
       new_start_time: '10:30:00',
       new_duration_minutes: 45,
       reason: 'Solicitud del paciente',
       changed_by: 2,
       changed_by_name: 'Rosa López',
-      created_at: `${localDate()}T15:00:00Z`,
+      created_at: `${clinicDate()}T15:00:00Z`,
     }])
     renderPage()
 
@@ -597,7 +599,7 @@ describe('AppointmentsPage', () => {
 
     expect(await screen.findByRole('region', { name: 'Historial de reprogramaciones' })).toBeInTheDocument()
     expect(screen.getByText(/31\/08\/2026.*09:00.*60 min/)).toBeInTheDocument()
-    expect(screen.getByText(new RegExp(`${localDate().split('-').reverse().join('/')}.*10:30.*45 min`))).toBeInTheDocument()
+    expect(screen.getByText(new RegExp(`${clinicDate().split('-').reverse().join('/')}.*10:30.*45 min`))).toBeInTheDocument()
     expect(screen.getByText('Solicitud del paciente')).toBeInTheDocument()
     expect(screen.getByText(/Rosa López/)).toBeInTheDocument()
     expect(appointmentService.listAppointmentReschedules).toHaveBeenCalledWith('access-token', 9)
@@ -608,7 +610,7 @@ describe('AppointmentsPage', () => {
       service: 5,
       service_name: 'Valoración clínica',
       consultation: 41,
-      attendance_started_at: `${localDate()}T15:05:00Z`,
+      attendance_started_at: `${clinicDate()}T15:05:00Z`,
       status: 'EN_ATENCION',
       status_display: 'En atención',
     })])
@@ -652,7 +654,7 @@ describe('AppointmentsPage', () => {
   it('continues a linked attendance and hides clinical actions without permission', async () => {
     appointmentService.listAllAppointments.mockResolvedValue([appointment({
       consultation: 41,
-      attendance_started_at: `${localDate()}T15:05:00Z`,
+      attendance_started_at: `${clinicDate()}T15:05:00Z`,
       status: 'EN_ATENCION',
       status_display: 'En atención',
     })])
@@ -677,7 +679,7 @@ describe('AppointmentsPage', () => {
   it('[HU-46] opens a completed linked consultation without attendance actions', async () => {
     appointmentService.listAllAppointments.mockResolvedValue([appointment({
       consultation: 41,
-      attendance_started_at: `${localDate()}T15:05:00Z`,
+      attendance_started_at: `${clinicDate()}T15:05:00Z`,
       status: 'COMPLETADA',
       status_display: 'Completada',
     })])
@@ -711,7 +713,7 @@ describe('AppointmentsPage', () => {
       patient: 1,
       professional: 3,
       professional_name: 'Dra. Elena Vargas',
-      date: localDate(),
+      date: clinicDate(),
       time: '09:05:00',
       consultation_type: 'GENERAL',
       consultation_type_display: 'Consulta general',
